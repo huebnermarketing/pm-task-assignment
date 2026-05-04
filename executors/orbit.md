@@ -1,4 +1,4 @@
-> **This executor uses ONLY the relevant MCP from the 6-MCP allowlist. The allowlist is closed: Orbit, Gmail, Slack, Fathom, Notion, scheduled-tasks. No other MCP, ever.**
+> **This executor uses ONLY the Orbit MCP. Source allowlist — primary collection: Orbit, Gmail, Slack, Fathom, Notion. Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever.**
 
 > **Preflight (`preflight.md`) must have run before this executor is invoked.**
 
@@ -17,7 +17,7 @@ Use `mcp__...orbit.create_task`.
 Required parameters:
 - `project_id` — from the row's matched project
 - `title` — plain-language task title (processed through `writers/plain-language.md`)
-- `description` — 6-section body per `schemas/orbit-dq-standard.md`, in plain language, with source citations per `writers/source-citation.md`
+- `description` — 6-section body per `schemas/orbit-dq-standard.md`, in plain language, with source citations per `writers/source-citation.md`. Read `orbit_task_header_style` from Preferences to pick header glyphs (`professional` default, or `emoji` if the PM opted in).
 
 Optional parameters:
 - `assignee` — Orbit user ID (from the recommended assignee or PM note override)
@@ -59,10 +59,22 @@ Common update patterns:
 
 Use `mcp__...orbit.change_task_due_date`.
 
-**Strict requirement** from the tool: fresh `reason` + `category_id` on every call. Do not reuse from a prior call.
+Two paths, depending on whether the task already has a due date:
+
+#### Path A — Initial due date set (existing `due_date` is null)
+
+For authorized users, Orbit now allows null → date without `reason` or `category_id`. Call the tool with the date only. Skip `reason` and `category_id`. Log on the row: `Initial due date set — no reason required.`
+
+Use this path when `get_task_details` returns the task with `due_date == null` (i.e., the task was created without one and we are setting it for the first time).
+
+#### Path B — Due date change (existing `due_date` is non-null)
+
+The tool requires fresh `reason` + `category_id` on every call. Do not reuse from a prior call.
 
 - `reason` — from the PM's note or the source signal's reason. Be specific. Example: `Client requested revised deadline via email on 25 April 2026.`
 - `category_id` — pick from `references/due-date-categories.md` mapping. Default fallback: 3 (Other critical task/priority).
+
+Detection: before calling the tool, fetch the task (or read the value already loaded by Mode 2 from the row's reference context) and branch on `due_date == null`. If the field state is unknown, default to Path B (safer — the tool will accept reason/category even on null→date for non-authorized users).
 
 ### Add a comment to a task
 
@@ -125,7 +137,7 @@ Strings in Orbit that are only for PM / AM eyes (internal admin notes) stay in n
 
 ## Source citation
 
-Every Orbit task body's `📎 REFS` section includes citations for every source that contributed to the task, per `writers/source-citation.md`.
+Every Orbit task body's REFS section (last of the 6 sections) includes citations for every source that contributed to the task, per `writers/source-citation.md`.
 
 If the task was derived from a document (PDF, image, PPT) that the skill read via download-and-native-read, the citation explicitly says so:
 > "Sourced from `homepage_revision_feedback.pdf` attached to Orbit task #105892 — content read by the skill on 25 April 2026."
@@ -157,4 +169,4 @@ Multiple operations combine with periods: `Task created → Orbit [link]. Slack 
 - Does not change `project_owner_id` or `account_manager_id`.
 - Does not delete tasks, projects, or comments.
 - Does not bulk-update.
-- Does not touch V3-related pages or projects.
+- Does not touch V3-related pages or projects (see `references/v3-context.md`).

@@ -1,6 +1,6 @@
 # First-Run Setup
 
-> **This file replaces the previous interactive 9-question setup flow. Routines cannot ask questions. Per-PM setup now happens by duplicating a Notion Preferences template page and filling fields inline before scheduling the routines.**
+> **Operator-facing per-PM setup.** Routines fire headless (no human in the loop), so per-PM Preferences must already exist on disk (in Notion) before the first routine fire. The operator duplicates a master `Preferences — Template` page into the PM's parent and fills it inline. For interactive (Claude Desktop) runs, the same Preferences page is read; if a required field is missing the skill reports it via the same preflight error path. See `ENVIRONMENTS.md` for the two execution surfaces.
 
 ## Why the change
 
@@ -16,10 +16,10 @@ For each field below: a placeholder example is given, then "valid input" describ
 
 Block type: four inline text properties at the top of the page.
 
-- `Full name` — placeholder `Aditi Singh`. Valid: any non-empty string with at least a first and last name. Missing: blank, or only one word.
-- `Orbit user ID` — placeholder `935`. Valid: integer between 1 and 99999. Missing: blank, non-numeric, or `0`.
-- `Canonical email` — placeholder `aditis@whitelabeliq.com`. Valid: a `@whitelabeliq.com` address. Missing: blank, or any other domain.
-- `Email aliases` — placeholder `aditi@whitelabeliq.com` (one per line, optional). Valid: zero or more `@whitelabeliq.com` addresses, one per line. Missing: never (this field is optional and can be empty).
+- `Full name` — placeholder `[PM Full Name]`. Example: `Aditi Singh`. Valid: any non-empty string with at least a first and last name. Missing: blank, or only one word.
+- `Orbit user ID` — placeholder `[PM Orbit ID]`. Example: `935`. Valid: integer between 1 and 99999. Missing: blank, non-numeric, or `0`.
+- `Canonical email` — placeholder `pm@whitelabeliq.com`. Example: `aditis@whitelabeliq.com`. Valid: a `@whitelabeliq.com` address. Missing: blank, or any other domain.
+- `Email aliases` — placeholder `[alias@whitelabeliq.com]` (one per line, optional). Example: `aditi@whitelabeliq.com`. Valid: zero or more `@whitelabeliq.com` addresses, one per line. Missing: never (this field is optional and can be empty).
 
 ### Field 2 — Morning run time (IST)
 
@@ -41,18 +41,18 @@ Block type: single text property labelled `Execution run time (IST)`.
 
 Block type: a `Backup` toggle block containing four inline properties.
 
-- `Backup name` — placeholder `Hiten Upadhyay`. Valid: any non-empty name that is **not** the PM's own name from Field 1. Missing: blank, or matches the PM's own name (preflight rejects self-as-backup).
+- `Backup name` — placeholder `[Backup Full Name]`. Example: `Hiten Upadhyay`. Valid: any non-empty name that is **not** the PM's own name from Field 1. Missing: blank, or matches the PM's own name (preflight rejects self-as-backup).
 - `Backup channel` — placeholder `Slack`. Valid: one of `Slack`, `Email`. Missing: blank or any other value.
-- `Backup handle/email` — placeholder `@hiten` (Slack) or `hitenu@whitelabeliq.com` (email). Valid: matches the channel above. Missing: blank, or doesn't match channel format.
+- `Backup handle/email` — placeholder `@[backup-handle]` (Slack) or `backup@whitelabeliq.com` (email). Example: `@hiten` (Slack) or `hitenu@whitelabeliq.com` (email). Valid: matches the channel above. Missing: blank, or doesn't match channel format.
 - `Ping time (IST)` — placeholder `11:00 IST`. Valid: 24-hour `HH:MM IST`, **at or after** the execution run time. Missing: blank, wrong format, or earlier than execution time.
 
 ### Field 5 — Account managers
 
 Block type: a Notion database labelled `Account Managers` embedded on the page. One row per AM. Columns:
 
-- `AM name` — placeholder `Caitlin Sims`. Valid: non-empty.
-- `AM email` — placeholder `caitlin@whitelabeliq.com`. Valid: any email.
-- `AM Slack handle` — placeholder `@caitlin`. Valid: starts with `@`.
+- `AM name` — placeholder `[AM Full Name]`. Example: `Caitlin Sims`. Valid: non-empty.
+- `AM email` — placeholder `am@whitelabeliq.com`. Example: `caitlin@whitelabeliq.com`. Valid: any email.
+- `AM Slack handle` — placeholder `@[am-handle]`. Example: `@caitlin`. Valid: starts with `@`.
 - `Channel preference` — placeholder `Slack for handoffs, email for paper trail`. Valid: free text describing routing rule.
 
 Missing: zero rows. If the PM truly has no AMs, they enter a single row with `AM name = NONE` — preflight will accept this and the skill will skip AM-bound drafts until the row is replaced.
@@ -61,14 +61,14 @@ Missing: zero rows. If the PM truly has no AMs, they enter a single row with `AM
 
 Block type: a `Email Defaults` toggle block with two inline properties.
 
-- `Default CC rules` — placeholder `CC the relevant AM on every client email; CC Nishant on every leadership email`. Valid: free text, at least 5 characters. Missing: blank.
-- `Email signature` — placeholder `Best,\nAditi`. Valid: free text, at least 3 characters. Missing: blank.
+- `Default CC rules` — placeholder `CC the relevant AM on every client email; CC [leadership] on every leadership email`. Example: `CC the relevant AM on every client email; CC Nishant on every leadership email`. Valid: free text, at least 5 characters. Missing: blank.
+- `Email signature` — placeholder `Best,\n[PM First Name]`. Example: `Best,\nAditi`. Valid: free text, at least 3 characters. Missing: blank.
 
 ### Field 7 — Default Slack tone for team handoffs
 
 Block type: a `Slack Tone` toggle block with one property.
 
-- `Default Slack tone` — placeholder `Direct and warm — short sentences, simple words, friendly. Always remind assignees to log hours.` Valid: free text, at least 20 characters. Missing: blank or under 20 chars.
+- `Default Slack tone` — placeholder `[describe your team handoff tone]`. Example: `Direct and warm — short sentences, simple words, friendly. Always remind assignees to log hours.` Valid: free text, at least 20 characters. Missing: blank or under 20 chars.
 
 ### Field 8 — Always-include rules
 
@@ -84,7 +84,7 @@ Block type: a `Always-include rules` toggle block containing a bulleted list.
 
 Block type: a `Tone Samples` toggle block with 3-5 child callouts, each containing a verbatim Slack/email paste.
 
-- Placeholder for each sample callout: a date label (e.g. `Sample 1 — Slack to Vijay, 20 April 2026`) followed by the verbatim message body.
+- Placeholder for each sample callout: a date label (example: `Sample 1 — Slack to [team member], 20 April 2026`) followed by the verbatim message body.
 - Valid: 3-5 callouts, each with at least 30 characters of body text.
 - Missing: this field is **optional**. Empty is allowed; preflight notes "tone samples skipped — using generic professional tone" and proceeds.
 

@@ -107,16 +107,16 @@ Under the `Sources` heading — see `schemas/row-detail-page.md`. Every source t
 
 ### In the Orbit task body
 
-In the `📎 REFS` section of the 6-section body — see `schemas/orbit-dq-standard.md`. Pipe-separated list of short citation links:
+In the `REFS` section of the 6-section body — see `schemas/orbit-dq-standard.md`. Pipe-separated list of short citation links. The header glyph (`**REFS:**` or `📎 REFS:`) follows the PM's `orbit_task_header_style` preference:
 
 ```
-📎 REFS: [Figma](<url>) | [Staging](<url>) | [Client feedback PDF](<url>) | [Previous task](<url>)
+**REFS:** [Figma](<url>) | [Staging](<url>) | [Client feedback PDF](<url>) | [Previous task](<url>)
 ```
 
 For document sources, the filename appears explicitly:
 
 ```
-📎 REFS: [Figma](<url>) | [Client feedback PDF: homepage_revision_feedback.pdf](<url>)
+**REFS:** [Figma](<url>) | [Client feedback PDF: homepage_revision_feedback.pdf](<url>)
 ```
 
 ### In Slack handoffs

@@ -1,6 +1,6 @@
 # connector-failure-notify.md — Failure Fallback Chain
 
-> **When any MCP connector in the 5-MCP allowlist fails (Orbit, Gmail, Slack, Fathom, Notion), the skill records and surfaces the failure through this fallback chain. Routines fire unattended, so each tier is fire-and-forget — no tier waits for human input.**
+> **When any MCP connector in the primary allowlist fails (Orbit, Gmail, Slack, Fathom, Notion), the skill records and surfaces the failure through this fallback chain. Routines fire unattended, so each tier is fire-and-forget — no tier waits for human input. Read-only reference MCPs (Google Drive/Docs/Sheets, SharePoint per `references/external-doc-access.md`) follow the same retry-with-backoff policy but their failures are non-blocking — they degrade row context but never abort a run.**
 
 ## When this fires
 
@@ -120,7 +120,7 @@ Used as a last resort, AND always used in addition to the above tiers as a safet
 Append an incident row to a dedicated `Incidents` sub-page on the Notion parent. Create the sub-page if it does not yet exist (one-time, on first incident). Each incident row captures:
 
 - Timestamp (ISO + local IST)
-- Mode that was running (Mode 1 / Mode 2 / Mode 3 escalation / monthly archival / preflight)
+- Mode that was running (Mode 1 / Mode 2 / Mode 2 Step 3a escalation / monthly archival / preflight)
 - MCP that failed
 - Error message (verbatim if available, summary otherwise)
 - `retry_on_next_fire` flag (boolean — `true` if the skill thinks a retry next fire is worth attempting; `false` if the failure looks structural)

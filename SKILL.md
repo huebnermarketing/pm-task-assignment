@@ -1,6 +1,6 @@
 ---
 name: pm-task-assignment
-description: Automates a WLIQ Project Manager's pre-office morning hour. Collects overnight signals from Orbit, Gmail, Slack, and Fathom; writes a plain-language morning queue to a Notion page; executes internal task assignments and reassignments in Orbit (plus Slack handoffs and Gmail drafts) after the PM approves. Runs as 3 separate Claude Routines (Mode 1 morning collection, Mode 2 execution, monthly archival), each fired by its own cron schedule with a baked prompt that loads this skill from a public GitHub repo. Manual out-of-routine commands also accepted — e.g. "PM Task Assignment, run morning", "PM Task Assignment, run execution now", "PM Task Assignment, change my preference:", "PM Task Assignment, update tone samples" — and are documented in `manual-overrides.md`. Lenient about phrasing — variations like "skill PM task assignment, run my morning" or "PM task assignment run morning" all route correctly.
+description: Automates a WLIQ Project Manager's pre-office morning hour. Collects overnight signals from Orbit, Gmail, Slack, and Fathom; writes a plain-language morning queue to a Notion page; executes internal task assignments and reassignments in Orbit (plus Slack drafts appended to Notion and Gmail drafts) after the PM approves. Runs as 3 separate Claude Routines (Mode 1 morning collection, Mode 2 execution, monthly archival) on cron; same skill also runs interactively in Claude Desktop or programmatically via Claude Code / SDK (see `ENVIRONMENTS.md`). Manual out-of-routine commands also accepted — e.g. "PM Task Assignment, run morning", "PM Task Assignment, run execution now", "PM Task Assignment, validate setup" — documented in `invocation-commands.md`. Lenient about phrasing — variations like "skill PM task assignment, run my morning" or "PM task assignment run morning" all route correctly.
 ---
 
 # PM Task Assignment
@@ -9,9 +9,11 @@ description: Automates a WLIQ Project Manager's pre-office morning hour. Collect
 
 ## Source allowlist — read this before touching any tool
 
-This skill uses only these MCPs: **Orbit, Gmail, Slack, Fathom, Notion**.
+This skill uses these MCPs as **primary sources**: **Orbit, Gmail, Slack, Fathom, Notion**.
 
-Any other MCP is forbidden — including any that may seem relevant to a specific signal, including any added to the user's Cowork after installation, including any the running user explicitly asks the skill to use. The allowlist is closed.
+It uses these MCPs as **on-demand read-only references** when an allowed primary signal links to a file there: **Google Drive, Google Docs, Google Sheets, SharePoint**. Read-only. Never write. Trigger condition: a primary signal (Gmail / Slack / Fathom / Orbit / Notion) contains a link or attachment pointing at the document; the skill MAY fetch the doc's content for context. See `references/external-doc-access.md`.
+
+Any other MCP is forbidden — including any added to the user's Cowork after installation, including any the running user explicitly asks the skill to use.
 
 This rule applies even under experimental scope, forced runs, sandbox runs, or any kind of override. If a signal seems relevant from a forbidden source, ignore it.
 
@@ -23,18 +25,16 @@ Eliminates the one hour WLIQ Project Managers currently spend from home every mo
 
 This skill replaces all of that except the PM's approval moment. Each PM runs the skill on their own Claude account. Their MCP connections (Orbit, Gmail, Slack, Fathom, Notion) provide the data. The skill writes the morning's work to a Notion page identified in `config.md`. The PM reviews, approves, and the skill executes.
 
-**Routine execution model.** This skill runs as 3 separate Claude Routines (Mode 1 = morning collection, Mode 2 = execution, monthly archival), each fired by its own cron schedule with a baked prompt. The skill files are loaded from a public GitHub repo at fire time. Interactive flows — first-run setup, manual commands, mid-run confirmations — are NOT used inside routines. See `setup-template.md` for per-PM Preferences setup (operator-facing, one-time) and `manual-overrides.md` for out-of-routine catch-up runs.
+**Execution model.** This skill runs under two surfaces: (1) headless — Claude Routines on cron, or programmatic Claude Code / SDK invocations — never asks questions; (2) interactive — a PM types a manual command in Claude Desktop — may ask one clarifying question per ambiguous item before falling back to `Uncertain:`. Both surfaces share the same preflight, allowlist, writes, plain-language rules, and run-log behavior. The only difference is question-asking. See `ENVIRONMENTS.md` for the surface-detection contract and what is shared. See `ROUTINE-ENTRYPOINTS.md` for the three baked routine prompts; `invocation-commands.md` for the interactive commands.
 
-## The two modes plus the escalation run
+## The two modes
 
-**Mode 1 — Scheduled morning run.** Fires automatically at the time configured in Preferences (default 9:30 AM IST). After preflight, pulls overnight signals. Synthesizes them into items. Writes today's dated sub-page at the top of the PM's Notion parent (the one identified in `config.md`). Registers the escalation check. No PM input required during this run.
+**Mode 1 — Scheduled morning run.** Fires automatically at the time configured in Preferences (default 9:30 AM IST). After preflight, pulls overnight signals. Synthesizes them into items. Writes today's dated sub-page at the top of the PM's Notion parent (the one identified in `config.md`). No PM input required during this run.
 
 **Mode 2 — Scheduled execution run.** Fires automatically at the configured execution time (default 10:45 AM IST). After preflight, reads the page-level `Ready for Execution` toggle at the top of today's dated page.
 
 - If **ON**, executes every row the PM marked `Approved` and every row with a PM note. Writes `Done` outcomes back. Slacks the PM a completion summary.
-- If **OFF**, treats this as "PM didn't review" and fires the escalation — Slacks the backup person configured in Preferences.
-
-**Escalation run.** Collapsed into the end of Mode 2. Acts only when the Ready toggle is OFF.
+- If **OFF**, runs the inline escalation flow (Mode 2 Step 3a) — Slacks (or emails) the backup person configured in Preferences and exits. Escalation is a fallback branch of Mode 2, not a separate mode.
 
 ## Invocation commands (manual overrides)
 
@@ -100,7 +100,7 @@ Mode 1 (scheduled collection):
 Mode 2 (scheduled execution):
   → preflight
   → Read today's dated page — check Ready toggle
-  → If OFF: fire escalation (Slack backup), stop
+  → If OFF: run inline escalation flow (Step 3a) → Slack/email backup → stop
   → If ON:
     → For each row: read Status + PM Notes
     → synthesis/note-interpreter.md — resolve PM note intent
@@ -137,21 +137,21 @@ Connector failure at any step:
 | **Fathom** | Calls PM attended (and missed) in last 24h + action items + recording links | `mcp__...fathom.*` |
 | **Notion** | Read Preferences. Write dated sub-pages, inline database, row detail pages. On 1st of month: move previous month into named toggle. ONLY the Notion parent page identified in `config.md`. | `mcp__...notion.*` |
 
-Explicitly forbidden: Pipedrive, Apollo, Common Room, Hex, Calendar, Keka, Atlassian, Linear, Intercom, Figma, Klaviyo, Ahrefs, Canva, ClickUp, Monday, Fireflies, Pendo, Amplitude, Quickbooks, or any other connector. The allowlist is closed.
+Explicitly forbidden: Pipedrive, Apollo, Common Room, Hex, Calendar, Keka, Atlassian, Linear, Intercom, Figma, Klaviyo, Ahrefs, Canva, ClickUp, Monday, Fireflies, Pendo, Amplitude, Quickbooks, or any other connector. Google Drive / Docs / Sheets and SharePoint are allowed read-only on-demand only as defined in `references/external-doc-access.md` — never as primary collection sources.
 
 ## Non-negotiable rules
 
 1. **Preflight runs first.** Every invocation, every code path. No exceptions.
-2. **V3 stays sealed.** Do not edit any page under the V3 Notion space.
+2. **V3 stays sealed.** Do not edit any page under the V3 Notion space. See `references/v3-context.md` for what V3 is and why.
 3. **Plain language only for India delivery team outputs.** Slack handoffs to team members and Orbit task bodies use 4th–5th grade general English with role-specific technical terms preserved. PMs, AMs, and leadership get normal professional English. See `writers/plain-language.md`.
 4. **Source citation on everything sourced from a document.** When the skill reads a PDF, image, PPT, or doc for context, it cites the filename in the output. See `writers/source-citation.md`.
-5. **Nothing client-facing without PM approval.** Emails are drafts (with three documented exceptions in `executors/email.md`). Slack to team or AM requires Mode 2 approval.
+5. **Nothing client-facing or team-facing is auto-sent.** Emails are drafts (with three documented exceptions in `executors/email.md`). Slack to team or AM is drafted into today's dated Notion page under the row's Outcome — the PM copies and sends from there. The only Slack sends Mode 2 may make are: the PM self-summary, the escalation backup ping (Step 3a), and a team handoff with explicit PM `send` note + audience = team.
 6. **Availability is not checked.** Skill recommends the most suitable person by role. PM overrides via note if unavailable.
 7. **Mode 1 never asks the PM questions.** If unsure about an item, list it as its own row with an `Uncertain:` note in AI Notes. Never block waiting for input.
 8. **PM notes are interpreted as natural language.** See `synthesis/note-interpreter.md`. Short notes like `assign to Vijay`, `save as draft`, `mark as high priority` must resolve correctly.
 9. **Row-level approval is explicit per row.** No bulk-approve. No status sweep. Each row either gets flipped to `Approved`, gets a note, gets marked `Skip. No Action Needed`, or stays at `Recommended Action` (= no action).
 10. **Page-level approval is the `Ready for Execution` toggle at the TOP of each dated page.** Mode 2 only executes if the toggle is ON.
-11. **All Orbit task bodies follow the 6-section standard.** 📌 DO · 🎯 WHY · 🔗 CONTEXT · ✅ DONE WHEN · 🔍 SELF-QA · 📎 REFS. See `schemas/orbit-dq-standard.md`.
+11. **All Orbit task bodies follow the 6-section standard.** Sections in order: DO · WHY · CONTEXT · DONE WHEN · SELF-QA · REFS. Header style defaults to bold professional headers; PM may opt into `emoji` style via Preferences `orbit_task_header_style`. See `schemas/orbit-dq-standard.md`.
 12. **Source allowlist is closed.** See top of file.
 13. **Notion parent is hardcoded in `config.md`.** No discovery, no asking the PM where to write. The page is fixed per installation.
 14. **Connector failures notify the PM via the 4-tier fallback chain** in `connector-failure-notify.md`. Never silently fail.
@@ -163,13 +163,13 @@ Explicitly forbidden: Pipedrive, Apollo, Common Room, Hex, Calendar, Keka, Atlas
 
 Everything below this file provides the detailed behavior. Load the specific file when that behavior is needed.
 
+- `ENVIRONMENTS.md` — the two execution surfaces (headless routine/code vs interactive Claude Desktop) and how the skill adapts.
 - `config.md` — hardcoded Notion parent + operational rules. Loaded FIRST every invocation.
 - `preflight.md` — the 6-step preflight sequence. Runs after config, before any mode logic.
 - `connector-failure-notify.md` — 4-tier failure fallback chain.
-- `first-run-setup.md` — 9-question conversational setup flow. Triggered when Preferences doesn't exist. (superseded by setup-template.md / manual-overrides.md for routine deploys)
-- `invocation-commands.md` — exact command syntax and lenient routing rules. (superseded by setup-template.md / manual-overrides.md for routine deploys)
-- `setup-template.md` — operator-facing one-time per-PM Preferences setup template. Used outside routines to create the Preferences sub-page before the first routine fire.
-- `manual-overrides.md` — out-of-routine catch-up commands (manual Mode 1 / Mode 2 / preference edits) used when a routine fire was missed or an operator needs to edit Preferences.
+- `first-run-setup.md` — operator-facing per-PM Preferences-page setup. Use this before the first routine fire (or for any new PM rollout).
+- `invocation-commands.md` — exact interactive command syntax (`PM Task Assignment, run morning` / `run execution now` / `validate setup`) and lenient routing rules. Used by Claude Desktop sessions; routines never reach this routing.
+- `setup-template.md` — operator-facing one-time per-PM Preferences template. Reference companion to `first-run-setup.md`.
 - `ROUTINE-ENTRYPOINTS.md` — the 3 baked routine prompts (Mode 1 morning collection, Mode 2 execution, monthly archival). Each routine fires its prompt by cron and loads this skill from the public GitHub repo.
 - `schemas/run-log-database.md` — Run Log database schema (one row per routine fire) on the Notion parent.
 - `schemas/run-log-detail-page.md` — per-row detail page layout with the decision trace (subject → action → reason lines).
@@ -177,7 +177,6 @@ Everything below this file provides the detailed behavior. Load the specific fil
 - `DEPLOYMENT.md` — how to deploy this skill to a new PM (edit config, ship, install).
 - `modes/mode-1-morning-collection.md` — Mode 1 end-to-end orchestration.
 - `modes/mode-2-execution.md` — Mode 2 end-to-end orchestration.
-- `modes/mode-3-escalation.md` — escalation run (collapsed into Mode 2).
 - `modes/monthly-archival.md` — 1st-of-month archival at 6:00 AM IST.
 - `collectors/orbit.md`, `gmail.md`, `slack.md`, `fathom.md` — per-source data collection.
 - `synthesis/matcher.md` — signal grouping and summary generation, alias-aware.

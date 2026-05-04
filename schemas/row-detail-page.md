@@ -76,26 +76,31 @@ A short paragraph describing what the skill plans to do and why this specific ch
 
 ### H1: Proposed Orbit Task Body
 
-The full 6-section task body that will land in Orbit when Mode 2 executes. Per `schemas/orbit-dq-standard.md`. **In plain language** per `writers/plain-language.md` — the assignee reads this.
+The full 6-section task body that will land in Orbit when Mode 2 executes. Per `schemas/orbit-dq-standard.md`. **In plain language** per `writers/plain-language.md` — the assignee reads this. Header glyphs follow the PM's `orbit_task_header_style` preference (default `professional`).
 
 ```
-📌 DO: [what to do]
-🎯 WHY: [why it matters]
-🔗 CONTEXT: [project phase, what came before]
-✅ DONE WHEN:
+**DO:** [what to do]
+**WHY:** [why it matters]
+**CONTEXT:** [project phase, what came before]
+**DONE WHEN:**
   • [criterion 1]
   • [criterion 2]
   • [criterion 3]
-🔍 SELF-QA:
+**SELF-QA:**
   • [role-specific check 1]
   • [role-specific check 2]
   • [always] Left a completion comment
-📎 REFS: [link1] | [link2] | [link3]
+**REFS:** [link1] | [link2] | [link3]
 ```
 
 ### H1: Proposed Slack Handoff
 
-The exact Slack message that will be sent to the assignee when Mode 2 executes. **In plain language.** Matches the template in `executors/slack.md`.
+The Slack message body the skill plans to produce when Mode 2 runs. Tagged with an audience: `Team`, `AM`, or `Client`.
+
+- For `Team` and `AM` audiences, the message is **never auto-sent**. After Mode 2 runs, the body is appended to this same row's Outcome under a `Slack draft (copy to send)` block. The PM copies it from Notion into Slack and sends it on their own.
+- A real Slack send happens only on three paths: (1) PM self-summary DM, (2) escalation backup ping (Mode 2 Step 3a), or (3) a `Team` handoff where the PM Note explicitly says "send".
+
+Body uses the per-PM `Slack handoff template` from Preferences and is in plain language per `writers/plain-language.md`.
 
 ### H1: Proposed Email (if applicable)
 
@@ -164,12 +169,12 @@ The toggle stays closed by default. The PM never needs to open it. The skill rea
 <paragraph with reasoning>
 
 # Proposed Orbit Task Body
-📌 DO: ...
-🎯 WHY: ...
-🔗 CONTEXT: ...
-✅ DONE WHEN: ...
-🔍 SELF-QA: ...
-📎 REFS: ...
+**DO:** ...
+**WHY:** ...
+**CONTEXT:** ...
+**DONE WHEN:** ...
+**SELF-QA:** ...
+**REFS:** ...
 
 # Proposed Slack Handoff
 <plain-English handoff text>

@@ -38,7 +38,21 @@ Common patterns and mappings:
 | "client gave feedback / client sent revisions / got feedback from the client" | 9 — Received Client Feedback |
 | No clear signal from the note | 3 — Other critical task/priority (default) |
 
-## Reason text rules
+## Two paths
+
+The skill picks one of two paths before calling `change_task_due_date`:
+
+### Path A — Initial due date set (existing `due_date` is null)
+
+For authorized users, Orbit allows null → date without `reason` or `category_id`. The skill calls the tool with `task_id` + `due_date` only. No category mapping needed. The Run Log records `initial_due_date_set: true`.
+
+### Path B — Due date change (existing `due_date` is non-null)
+
+The strict path described in this file. Fresh `reason` + `category_id` required on every call. The category list and reason rules below apply.
+
+When the task's current `due_date` state is unknown, default to Path B — the tool accepts reason/category in either case, so this is the safe fallback.
+
+## Reason text rules (Path B only)
 
 The `reason` parameter must be a fresh, specific string every time. The tool explicitly rejects reused reasons.
 

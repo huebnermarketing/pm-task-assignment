@@ -1,6 +1,6 @@
 > **MANDATORY: `preflight.md` must run before any logic in this file. Do not call any tool, do not act on user input, until preflight has completed successfully. This includes scheduled-task triggers — preflight runs even when invoked by the scheduler.**
 
-> **Source allowlist (closed):** Orbit, Gmail, Slack, Fathom, Notion, scheduled-tasks. No other MCP, ever — including any that may seem relevant to a specific signal. The allowlist is enforced even under experimental scope or forced runs.
+> **Source allowlist:** Primary collection — Orbit, Gmail, Slack, Fathom, Notion. Read-only references on demand — Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever. The allowlist is enforced even under experimental scope or forced runs.
 
 # Notion Writer
 
@@ -100,7 +100,10 @@ For each row Mode 2 executed:
 
 - Flip `Status` to `Done` (or leave at prior state if failure; see `modes/mode-2-execution.md`)
 - Write the `Outcome` column with the concise result string
-- No changes to row detail page content — source-of-truth stays intact
+- If the row produced a team / AM Slack draft (the default path for non-`send` rows), append a `Slack draft (copy to send)` block to the row's detail page under the existing Outcome content. Block contents:
+  - First line — `Audience: <Team | AM | Client>` and `Recipient: <name> (<slack handle>)`
+  - The full plain-language draft body returned by `executors/slack.md`
+- No other changes to row detail page content — source-of-truth stays intact.
 
 ## Flow — monthly archival (1st of month)
 
@@ -121,7 +124,7 @@ Triggered by `PM Task Assignment, change my preference: ...` commands.
 2. Parse the instruction (free-form natural language from the PM)
 3. Locate the relevant section of the Preferences page
 4. Update the specific field(s)
-5. If the change affects scheduled tasks (e.g., run time changed), call `mcp__scheduled-tasks__update_scheduled_task` with the new time
+5. If the change affects run times (morning, execution), update the Preferences fields only — note in the operator's response that the corresponding Claude Routine cron must also be updated externally (the skill does not modify routines from inside).
 6. Confirm back to the PM: `Updated [section] to [new value].`
 
 Use `notion-update-page` with `command: update_content` and targeted find-and-replace for clean edits. Avoid full rewrites that could disrupt the page structure.
@@ -153,7 +156,7 @@ Use `notion-update-page` with `command: update_content` and targeted find-and-re
 
 ## What this writer does NOT do
 
-- Does not write to V3 pages
+- Does not write to V3 pages (see `references/v3-context.md`)
 - Does not modify the PM's Preferences page autonomously (only via explicit preference-edit commands)
 - Does not delete pages or databases
 - Does not change the parent page's page-level properties (title, icon)

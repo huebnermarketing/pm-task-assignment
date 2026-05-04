@@ -1,6 +1,8 @@
 # Routine Entrypoints
 
-This file holds the three exact prompts to paste into Claude Routines when deploying the PM Task Assignment skill for a new PM. Each routine is a cron-fired headless agent that loads the skill from a public GitHub repo at fire time and executes a single mode end-to-end. No mode performs any work outside its own scope.
+This file holds the three exact prompts to paste into Claude Routines when deploying the PM Task Assignment skill for a new PM. Each routine is a cron-fired headless agent that loads the skill from a public GitHub repo OR from a local skill directory (whichever is available — see `ENVIRONMENTS.md`) and executes a single mode end-to-end. No mode performs any work outside its own scope.
+
+Manual interactive runs (Claude Desktop) use the same skill files — see `invocation-commands.md` for the commands.
 
 > Three routines, three modes. Routine 1 collects, Routine 2 executes, Routine 3 archives. Nothing else.
 
@@ -42,7 +44,7 @@ Strict-skill rule: this prompt does NOT override skill behavior. Where this prom
 
 Time zone: the skill is timezone-locked to Asia/Kolkata (Indian Standard Time, UTC+05:30). Every "today / yesterday / overnight window / Preferences run-time" calculation MUST be performed in IST. Do not use UTC, GMT, or the runner's local TZ for any date math, page title, log timestamp, or window boundary. Page titles use IST date in "DD Month YYYY" format (e.g., "30 April 2026"); Run Log "Started"/"Finished" timestamps are recorded in IST with the timezone offset suffix.
 
-Load and follow these files in order, fetching from the public skill repo:
+Load and follow these files in order. Prefer local files when present (Claude Code / SDK invocations); otherwise fetch from the public skill repo (Claude Routines fired by cron):
 1. <REPO_URL>/SKILL.md
 2. <REPO_URL>/config.md
 3. <REPO_URL>/preflight.md
@@ -87,7 +89,7 @@ Strict-skill rule: this prompt does NOT override skill behavior. Where this prom
 
 Time zone: the skill is timezone-locked to Asia/Kolkata (Indian Standard Time, UTC+05:30). "Today's queue page" is resolved by IST date. Run Log "Started"/"Finished" timestamps are in IST with offset suffix. Do not use UTC / GMT / runner-local TZ for any date math.
 
-Load and follow these files in order, fetching from the public skill repo:
+Load and follow these files in order. Prefer local files when present (Claude Code / SDK invocations); otherwise fetch from the public skill repo (Claude Routines fired by cron):
 1. <REPO_URL>/SKILL.md
 2. <REPO_URL>/config.md
 3. <REPO_URL>/preflight.md
@@ -101,7 +103,7 @@ Connectors available in this routine (all 5, closed allowlist): Orbit, Gmail, Sl
 
 Execute Mode 2 end-to-end:
 - Run preflight Steps 1–6 against the Notion parent and Preferences page.
-- Resolve today's dated queue page via Parent → <Year> → <Month> → <DD Month YYYY> (IST). If the page-level Ready toggle is OFF, fire the escalation per modes/mode-3-escalation.md and exit.
+- Resolve today's dated queue page via Parent → <Year> → <Month> → <DD Month YYYY> (IST). If the page-level Ready toggle is OFF, fire the inline escalation flow defined in modes/mode-2-execution.md Step 3a and exit.
 - If Ready is ON: read every row's Status and PM Notes. Resolve note intent via synthesis/note-interpreter.md. Execute Approved rows and rows with PM notes via the executors (executors/orbit.md, executors/email.md, executors/slack.md).
 - Write each row's Outcome + Status back via writers/notion.md. Apply writers/plain-language.md and writers/source-citation.md to all team-facing outputs.
 - Slack the PM a completion summary.
@@ -133,7 +135,7 @@ Strict-skill rule: this prompt does NOT override skill behavior. Hierarchy invar
 
 Time zone: the skill is timezone-locked to Asia/Kolkata (Indian Standard Time, UTC+05:30). Compute "previous month" in IST. Run Log timestamps in IST with offset suffix. Do not use UTC / GMT / runner-local TZ for the month-boundary calculation.
 
-Load and follow these files in order, fetching from the public skill repo:
+Load and follow these files in order. Prefer local files when present (Claude Code / SDK invocations); otherwise fetch from the public skill repo (Claude Routines fired by cron):
 1. <REPO_URL>/SKILL.md
 2. <REPO_URL>/config.md
 3. <REPO_URL>/preflight.md
@@ -167,7 +169,7 @@ Exit when archival verification and the Run Log row + detail page are complete.
 After all 3 routines are created in Claude Routines:
 
 1. Open a regular (non-routine) Claude session with the same MCPs authenticated.
-2. Run the manual `validate setup` command per `manual-overrides.md`, pointing at the same Preferences page URL.
+2. Run the manual `validate setup` command per `invocation-commands.md`, pointing at the same Preferences page URL.
 3. Confirm preflight passes — parent page reachable, Preferences page parsed cleanly, all 5 MCPs respond (Orbit, Gmail, Slack, Fathom, Notion), Run Log + Incidents + Preferences present in the correct order at the bottom of the parent (or that preflight Step 6 created them on first run).
 4. If `validate setup` reports errors, fix before relying on the routines.
 

@@ -72,7 +72,7 @@ Apply the **brevity rules** (next section) to every reason field before renderin
 
 ### Step 4 — Create the detail sub-page
 
-Call `mcp__claude_ai_Notion__notion-create-pages` with:
+Call `mcp__...notion.notion-create-pages` with:
 
 - Parent: the `Run Log` sub-page (preferred — keeps detail pages co-located) on `NOTION_PARENT_PAGE_ID`.
 - Title: the Run ID from Step 2.
@@ -84,7 +84,7 @@ Capture the returned page URL — it goes into the database row's `Detail` colum
 
 ### Step 5 — Append the database row
 
-Call `mcp__claude_ai_Notion__notion-create-pages` (or the database-row variant) targeting the `Run Log` inline database. Column values:
+Call `mcp__...notion.notion-create-pages` (or the database-row variant) targeting the `Run Log` inline database. Column values:
 
 | Column           | Value                                                                |
 | ---------------- | -------------------------------------------------------------------- |

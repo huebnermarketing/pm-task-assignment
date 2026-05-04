@@ -1,9 +1,43 @@
 # Schema — Orbit Data Quality Standard
 
-The six-section template every Orbit task body the skill creates MUST follow. Carried verbatim from WLIQ's V3 reference:
-[📛 Orbit Data Quality Standard](https://www.notion.so/3423846840c881b09483f2cebe1b5ec6)
+The six-section template every Orbit task body the skill creates MUST follow. Carried from WLIQ's V3 reference (see `references/v3-context.md` for what V3 is):
+[Orbit Data Quality Standard](https://www.notion.so/3423846840c881b09483f2cebe1b5ec6)
 
-## The template
+## Header style — configurable per PM
+
+Two header styles supported. Default is `professional`. The PM may override via the `orbit_task_header_style` field in their Preferences page (see `schemas/preferences-page.md`).
+
+| Style value     | Section headers used                                                                            |
+| --------------- | ----------------------------------------------------------------------------------------------- |
+| `professional` (default) | `**DO:**`, `**WHY:**`, `**CONTEXT:**`, `**DONE WHEN:**`, `**SELF-QA:**`, `**REFS:**`   |
+| `emoji`         | `📌 DO`, `🎯 WHY`, `🔗 CONTEXT`, `✅ DONE WHEN`, `🔍 SELF-QA`, `📎 REFS`                          |
+
+Section content, ordering, and rules below are identical across styles. Only the header glyph changes.
+
+## The template (default — `professional` style)
+
+```
+**DO:** [What specifically needs to be done. 1–2 sentences max.]
+
+**WHY:** [Why this matters. 1 sentence.]
+
+**CONTEXT:** [Project phase. What came before. What depends on this.]
+
+**DONE WHEN:**
+  • [Criterion 1]
+  • [Criterion 2]
+  • [Criterion 3]
+
+**SELF-QA:**
+  • [Work-type specific check 1]
+  • [Work-type specific check 2]
+  • Compared against original requirement
+  • Left a completion comment
+
+**REFS:** [Links separated by | ]
+```
+
+## The template (`emoji` style — opt-in)
 
 ```
 📌 DO: [What specifically needs to be done. 1–2 sentences max.]
@@ -26,7 +60,7 @@ The six-section template every Orbit task body the skill creates MUST follow. Ca
 📎 REFS: [Links separated by | ]
 ```
 
-Every task the skill creates follows this structure, in this order, with these exact emoji labels.
+Every task the skill creates follows the section order and content rules below, using whichever header style Preferences specifies (default `professional`).
 
 ## Language rule
 
@@ -34,7 +68,9 @@ Every task the skill creates follows this structure, in this order, with these e
 
 ## Section-by-section guidance
 
-### 📌 DO
+Section headers below use the `professional` style. The `emoji` equivalents are documented in the header-style table above.
+
+### DO
 
 What exactly needs to happen. One to two sentences, specific.
 
@@ -44,7 +80,7 @@ Good:
 Not good:
 > "Please work on the hero image updates as per the attached feedback document."
 
-### 🎯 WHY
+### WHY
 
 Why this matters. One sentence. Gives the assignee context to make judgment calls.
 
@@ -54,7 +90,7 @@ Good:
 Not good:
 > "Per the client's request, we need to ensure timely delivery of the assets."
 
-### 🔗 CONTEXT
+### CONTEXT
 
 Project phase and dependencies. Two to four sentences. What came before, what depends on this.
 
@@ -64,7 +100,7 @@ Good:
 Not good:
 > "Related context is available in prior communications and project documentation."
 
-### ✅ DONE WHEN
+### DONE WHEN
 
 Bulleted list. Three to six criteria. Specific, verifiable, unambiguous.
 
@@ -79,7 +115,7 @@ Not good:
 - Client satisfied
 - Quality assured
 
-### 🔍 SELF-QA
+### SELF-QA
 
 Role-specific self-check items. Plus always: "Compared against original requirement" and "Left a completion comment".
 
@@ -94,7 +130,7 @@ Role-specific self-QA examples:
 | Design | Brand consistent; Responsive preview; Correct file formats exported; Assets named per project convention |
 | Content | Grammar and spelling checked; SEO meta filled; Tone matches client voice; Internal links verified |
 
-### 📎 REFS
+### REFS
 
 Pipe-separated list of links. Every link is clickable Markdown.
 
@@ -108,25 +144,25 @@ Not good:
 
 - Every section is present. If a section legitimately has nothing to say, still include the heading with a placeholder like `[None — reference the task title for context]` rather than omitting.
 - Keep sections tight. If DO or WHY run longer than two sentences, split the task — it's probably too big.
-- Keep formatting exact. The emoji labels and section order are recognizable at-a-glance and become muscle memory for the team.
+- Keep formatting consistent within a single PM's tasks. The header style is set per-PM in Preferences (`orbit_task_header_style`); the executor reads it on every run and applies it uniformly. Section order is fixed regardless of style.
 - REFS always includes at least one actual link. If there are no relevant links, include a link to the originating signal (the email thread, the Slack message, the Fathom recording).
 
-## Example — full Orbit task body
+## Example — full Orbit task body (`professional` style, default)
 
 ```
-📌 DO: Apply the 12 revisions from the client feedback PDF. Hero image swap, navigation restructure, two new footer callouts, and pricing table restructure.
+**DO:** Apply the 12 revisions from the client feedback PDF. Hero image swap, navigation restructure, two new footer callouts, and pricing table restructure.
 
-🎯 WHY: Client is presenting to their board next Thursday. Sarah (AM) said they are getting impatient.
+**WHY:** Client is presenting to their board next Thursday. Sarah (AM) said they are getting impatient.
 
-🔗 CONTEXT: This is Agency X's second revision round on the homepage. Round 1 was approved on April 12. Jane Miller is the client POC. The site is WordPress with a custom child theme.
+**CONTEXT:** This is Agency X's second revision round on the homepage. Round 1 was approved on April 12. Jane Miller is the client POC. The site is WordPress with a custom child theme.
 
-✅ DONE WHEN:
+**DONE WHEN:**
   • All 12 revisions applied to the mockup
   • Preview link shared with Jane via Slack
   • No console errors on mobile or desktop
   • Mannan signs off on QA
 
-🔍 SELF-QA:
+**SELF-QA:**
   • Tested on Chrome, Safari, Firefox, Edge
   • Responsive on desktop + tablet + mobile
   • No console errors
@@ -134,8 +170,10 @@ Not good:
   • Compared against original requirement
   • Left a completion comment
 
-📎 REFS: [Figma file](<url>) | [Staging URL](<url>) | [Previous homepage task (Round 1)](<url>) | [Client feedback PDF: homepage_revision_feedback.pdf](<url>) | [WP admin URL](<url>)
+**REFS:** [Figma file](<url>) | [Staging URL](<url>) | [Previous homepage task (Round 1)](<url>) | [Client feedback PDF: homepage_revision_feedback.pdf](<url>) | [WP admin URL](<url>)
 ```
+
+The same body in `emoji` style swaps `**DO:**` → `📌 DO:`, `**WHY:**` → `🎯 WHY:`, etc.
 
 ## What this template does NOT include
 

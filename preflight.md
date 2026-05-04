@@ -12,12 +12,13 @@ Every entry into the skill:
 
 ## The 6-step preflight sequence
 
-### Step 1 — Read config.md in full
+### Step 1 — Read config.md in full and detect the execution surface
 
 - Open `config.md` and read every section.
 - Confirm `DEFAULT_NOTION_PARENT_PAGE_ID` is set to a real Notion page ID (32-char hex string with or without dashes).
-- Confirm the source allowlist clause is loaded into context: only Orbit, Gmail, Slack, Fathom, Notion. Nothing else.
+- Confirm the source allowlist clause is loaded into context: primary collection — Orbit, Gmail, Slack, Fathom, Notion; read-only references on demand — Google Drive/Docs/Sheets, SharePoint per `references/external-doc-access.md`.
 - Confirm the Preferences-must-be-respected clause is loaded.
+- **Set the in-memory flag `is_interactive`.** `true` if the skill was triggered by a human-typed message in a Claude session (Claude Desktop manual command); `false` if the trigger is a routine / cron / SDK invocation. Mode files read this flag to decide whether to ask one clarifying question per ambiguous item or to fall straight to `Uncertain:`. See `ENVIRONMENTS.md`.
 
 If `config.md` cannot be read or the page ID is missing/malformed, abort the run with a clear error message to the user: "config.md is missing or malformed. The skill cannot run. Please re-install or check the file."
 
@@ -76,7 +77,7 @@ After the verification:
 - **If 1+ MCPs are down:** the failure-notify flow has been triggered. Decision per mode:
   - Mode 1 (collection): proceed with the available collectors. Note the missing source on the dated page summary. Don't abort.
   - Mode 2 (execution): if Notion or Orbit are down, ABORT — they're load-bearing. Other MCPs are non-blocking; proceed with what's available.
-  - Mode 3 (escalation) and other commands: try to proceed with what's available; abort only if the specific MCP needed for THIS command is down.
+  - Other commands (preference edits, manual overrides): try to proceed with what's available; abort only if the specific MCP needed for THIS command is down. Escalation runs inside Mode 2 Step 3a — no separate Mode 3 entrypoint exists.
 
 ### Step 6 — Confirm parent-page operational sub-pages exist
 
@@ -95,7 +96,7 @@ After creation/verification, the bottom three children of the parent (in order) 
 - Does NOT execute any morning collection logic, executor logic, or write any task data. That happens after preflight returns control.
 - Does NOT modify Preferences.
 - Does NOT modify config.
-- Does NOT call any tool from outside the 6-MCP allowlist.
+- Does NOT call any tool from outside the source allowlist (5 primary MCPs + 4 read-only reference MCPs per `references/external-doc-access.md`).
 
 ## Identity check (also part of preflight, in step 5)
 

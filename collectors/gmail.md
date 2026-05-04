@@ -1,6 +1,6 @@
 # Gmail Collector
 
-> **This collector uses ONLY the Gmail MCP. Under no circumstances may this collector or any logic in this skill call any other MCP. The 6-MCP allowlist is closed: Orbit, Gmail, Slack, Fathom, Notion, scheduled-tasks. Nothing else, ever.**
+> **This collector uses ONLY the Gmail MCP. Source allowlist — primary collection: Orbit, Gmail, Slack, Fathom, Notion. Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). Nothing else, ever.**
 
 > **Preflight (`preflight.md`) must have run before this collector is invoked.**
 
@@ -24,8 +24,8 @@ If neither approach works (rare), notify the PM via `connector-failure-notify.md
 
 Email aliases listed in Preferences are treated as the same identity for both sender classification AND inbox scoping:
 
-- A message addressed to `aditi@whitelabeliq.com` (alias) is considered to have arrived at `aditis@whitelabeliq.com` (canonical) too — both pull the same signal
-- A message FROM `aditi@whitelabeliq.com` is considered FROM the PM (so it's filtered out as self-noise, not as inbound)
+- A message addressed to an alias address (example: `aditi@whitelabeliq.com`) is considered to have arrived at the canonical address (example: `aditis@whitelabeliq.com`) too — both pull the same signal
+- A message FROM any of the PM's alias addresses is considered FROM the PM (so it's filtered out as self-noise, not as inbound)
 
 ## Window
 
@@ -116,6 +116,21 @@ For every email flagged, pull the full thread via `gmail_read_thread`. The PM sh
 - Don't rely on Gmail's auto-summary (usually unavailable).
 - Matcher routes attachments through `writers/source-citation.md` for inclusion in row detail. If the assignee needs the file's actual content, the executor downloads via curl and Claude reads natively.
 
+## Post-collection action — mark read / apply label
+
+After a message has been successfully ingested into a Morning Queue row, the collector may mutate the source Gmail message based on the PM's `gmail_post_collection_action` Preference (default `none`):
+
+| Setting                       | Action                                                                                       |
+| ----------------------------- | -------------------------------------------------------------------------------------------- |
+| `none` (default)              | Do nothing. Source message untouched.                                                        |
+| `mark_read`                   | Remove the `UNREAD` label from the message.                                                  |
+| `apply_label`                 | Apply the configured `Gmail label name` (default `pm-task-assignment/collected`). Create the label first if it does not yet exist.       |
+| `mark_read_and_apply_label`   | Both of the above.                                                                           |
+
+Run this step only after the row has been written to Notion successfully. If the row write fails, do not mutate the Gmail message — the source signal must remain visible to the PM until it is recorded.
+
+If label creation or label application fails (Gmail MCP error), log the failure on the row's `AI Notes` and do not retry; the row already exists in Notion so the signal is captured. Mark-read failures follow the same rule.
+
 ## Tool calls (only Gmail MCP)
 
 - `mcp__...gmail.gmail_get_profile` — confirm the PM's WLIQ email at preflight
@@ -123,6 +138,10 @@ For every email flagged, pull the full thread via `gmail_read_thread`. The PM sh
 - `mcp__...gmail.gmail_read_thread` — full thread context
 - `mcp__...gmail.gmail_read_message` — individual message if needed
 - `mcp__...gmail.gmail_list_drafts` — for unsent drafts
+- `mcp__...gmail.list_labels` — used during `apply_label` to detect whether the configured label already exists
+- `mcp__...gmail.create_label` — used during `apply_label` to create the configured label on first use
+- `mcp__...gmail.label_message` / `mcp__...gmail.label_thread` — used during `apply_label` to attach the label to the source message or thread
+- `mcp__...gmail.unlabel_message` / `mcp__...gmail.unlabel_thread` — used during `mark_read` to remove the `UNREAD` label
 
 No other MCP. Period.
 
@@ -144,7 +163,7 @@ No other MCP. Period.
 ## What this collector does NOT do
 
 - Does not send, reply, forward, or draft emails.
-- Does not mark emails as read or apply labels.
+- Does not mark emails as read or apply labels unless the PM enables it via `gmail_post_collection_action` in Preferences.
 - Does not archive.
 - Does not synthesize or group. That's the matcher.
 - Does not filter by importance or urgency. All relevant signals are returned.

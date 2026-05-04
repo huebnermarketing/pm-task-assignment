@@ -27,17 +27,16 @@ Opening paragraph:
 | Field | Description |
 |---|---|
 | **Name** | The PM's full name |
-| **Orbit user ID** | Integer (e.g., `935`) — looked up via `mcp__...orbit.list_users` during first-run |
-| **Canonical email** | The PM's primary work email (e.g., `aditis@whitelabeliq.com`) |
-| **Email aliases** | A bulleted list of all alias addresses that map to this PM. Empty if none. Example: `- aditi@whitelabeliq.com` |
+| **Orbit user ID** | Integer — looked up via `mcp__...orbit.list_users` during first-run. Example: `935`. |
+| **Canonical email** | The PM's primary work email on `@whitelabeliq.com`. Example: `aditis@whitelabeliq.com`. |
+| **Email aliases** | A bulleted list of all alias addresses that map to this PM. Empty if none. Example: `- aditi@whitelabeliq.com`. |
 
 The skill matches the authenticated Slack profile / Gmail account against the canonical email AND any aliases. Any one match = identity confirmed.
 
 ### H2: Run Schedule
 
 - **Morning collection run (Mode 1):** [time] IST, daily
-- **Execution run (Mode 2):** [time] IST, daily
-- **Escalation check:** at end of execution run (fires automatically if Ready toggle is OFF)
+- **Execution run (Mode 2):** [time] IST, daily — if the Ready toggle is OFF at this time, Mode 2 runs its inline escalation flow (Step 3a) and exits without executing any rows.
 - **Monthly archival:** 1st of each month at 6:00 AM IST
 
 Plus a line about manual invocation:
@@ -79,6 +78,24 @@ A table:
 Plus:
 
 - **Email signature:** `[signature text]` — applied to all drafted emails
+- **Orbit task body header style:** `professional` (default) | `emoji` — header glyphs used in the 6-section Orbit task body. See `schemas/orbit-dq-standard.md` for the full mapping. Section order and content are unchanged across styles; only the header glyph changes.
+- **Gmail post-collection action:** `none` (default) | `mark_read` | `apply_label` | `mark_read_and_apply_label` — what the Gmail collector does to a source message after it lands in the morning queue. See `collectors/gmail.md`.
+- **Gmail label name:** `pm-task-assignment/collected` (default) — only used when the post-collection action includes `apply_label`. The label is created in the PM's Gmail on first use if it does not exist.
+- **Slack handoff template:** the per-PM template body for team handoff drafts. The format is whatever the PM writes here; the executor does not impose its own structure beyond plain-language enforcement and source-citation rules. Default suggestion (the PM may edit freely):
+
+  ```
+  <project name / brief task title>
+
+  What to do: <one sentence, plain English>
+
+  Why: <one sentence — why this matters or who's waiting>
+
+  Context you need: <link to Orbit task, Figma, staging URL, file>
+
+  Please log your hours.
+  ```
+
+- **AM communication:** team and AM Slack messages are **never auto-sent** by the skill. Drafts are appended to the row's Outcome on today's dated Notion page after Mode 2 runs; the PM copies and sends from there. The only Slack sends Mode 2 may perform are: (a) the PM self-summary DM, (b) the escalation message to the backup, and (c) a team handoff explicitly approved with a PM note that says "send" AND audience = team.
 
 ### H2: Always-Include Rules
 

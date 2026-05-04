@@ -1,4 +1,4 @@
-> **This collector uses ONLY the relevant MCP from the 6-MCP allowlist. The allowlist is closed: Orbit, Gmail, Slack, Fathom, Notion, scheduled-tasks. No other MCP, ever — including any that may seem relevant to a specific signal.**
+> **This collector uses ONLY the Fathom MCP. Source allowlist — primary collection: Orbit, Gmail, Slack, Fathom, Notion. Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever — including any that may seem relevant to a specific signal.**
 
 > **Preflight (`preflight.md`) must have run before this collector is invoked. Do not call any tool until preflight has completed.**
 

@@ -1,4 +1,4 @@
-> **This executor uses ONLY the relevant MCP from the 6-MCP allowlist. The allowlist is closed: Orbit, Gmail, Slack, Fathom, Notion, scheduled-tasks. No other MCP, ever.**
+> **This executor uses ONLY the Gmail MCP. Source allowlist — primary collection: Orbit, Gmail, Slack, Fathom, Notion. Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever.**
 
 > **Preflight (`preflight.md`) must have run before this executor is invoked.**
 
@@ -16,7 +16,7 @@ Draft and optionally send emails on the PM's behalf via Gmail MCP. Default behav
 
 These are the only cases where this executor sends an email rather than saving it as a draft. Every other email is a draft.
 
-1. **Escalation email to the configured backup person** (from `modes/mode-3-escalation.md`, when the backup's preferred channel in Preferences is `email`). Internal, operational. Sent.
+1. **Escalation email to the configured backup person** (from `modes/mode-2-execution.md` Step 3a, when the backup's preferred channel in Preferences is `email`). Internal, operational. Sent.
 2. **Self-notification on connector failure** (from `connector-failure-notify.md` Tier 2, when Slack is unreachable). The PM's Gmail sends an email TO themselves (canonical email or any alias) so they see the connector failure in their inbox. Sent.
 3. **PM note explicitly says "send"** (e.g., a PM Notes value like `send this to Caitlin now`). The matcher's note interpreter recognizes the explicit send instruction and the executor sends rather than drafts.
 
@@ -44,7 +44,7 @@ Draft is saved in the PM's Gmail. They open, review, send from Gmail.
 
 Only two cases where the skill sends directly:
 
-1. **Escalation email to the PM's configured backup** (from `modes/mode-3-escalation.md`). Internal, operational.
+1. **Escalation email to the PM's configured backup** (from `modes/mode-2-execution.md` Step 3a). Internal, operational.
 2. **When the PM's note explicitly says "send"** — e.g., "send this to Caitlin", "send the email".
 
 For all other cases (drafts are the default), leave it as a draft.

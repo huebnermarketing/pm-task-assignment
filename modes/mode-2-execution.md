@@ -1,6 +1,6 @@
 > **MANDATORY: `preflight.md` must run before any logic in this file. Do not call any tool, do not act on user input, until preflight has completed successfully. This includes routine triggers — preflight runs even when invoked by a scheduled cloud routine.**
 
-> **Source allowlist (closed):** Orbit, Gmail, Slack, Fathom, Notion. No other MCP, ever — including any that may seem relevant to a specific signal. The allowlist is enforced even under experimental scope or forced runs.
+> **Source allowlist:** Primary collection — Orbit, Gmail, Slack, Fathom, Notion. Read-only references on demand — Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever. The allowlist is enforced even under experimental scope or forced runs.
 
 # Mode 2 — Execution Run
 
@@ -11,7 +11,9 @@
 
 ## What Mode 2 does
 
-Reads today's dated page in Notion. Checks the page-level `Ready for Execution` toggle at the top. If ON, executes every approved row and every row with a PM note. Writes outcomes back. Slacks the PM a completion summary. If OFF, fires escalation per `modes/mode-3-escalation.md` and exits — routines cannot wait for the PM to flip a toggle.
+Reads today's dated page in Notion. Checks the page-level `Ready for Execution` toggle at the top. If ON, executes every approved row and every row with a PM note. Writes outcomes back. Slacks the PM a completion summary. If OFF, fires the inline escalation flow (Step 3a) and exits — routines cannot wait for the PM to flip a toggle.
+
+Mode 2 is identical across the two execution surfaces (headless vs interactive — see `ENVIRONMENTS.md`). The only difference: in interactive mode, when a PM Note is genuinely ambiguous and `synthesis/note-interpreter.md` returns `confidence = low`, the skill may ask the PM one clarifying question before falling back to `HELD`. In headless mode it always falls back to `HELD`.
 
 ## End-to-end flow
 
@@ -27,8 +29,80 @@ Search the PM's Notion parent for a sub-page titled with today's date in "DD Mon
 
 The toggle is a checkbox block at the top of the dated page. Fetch the page content and find the to-do block labeled `Ready for Execution`.
 
-- **If unchecked (OFF):** fire escalation per `modes/mode-3-escalation.md` (Slack the configured backup with the unapproved-queue context), append a run-log entry via `writers/run-log.md` recording outcome `escalated` (with reason `ready_toggle_off`), and exit. Do NOT prompt the PM to flip the toggle. Do NOT wait. Routines cannot block on human input — if the PM never approved by execution time, the backup owns it.
-- **If checked (ON):** proceed.
+- **If unchecked (OFF):** fire the inline escalation flow (Step 3a below), append a run-log entry via `writers/run-log.md` recording outcome `escalated` (with reason `ready_toggle_off`), and exit. Do NOT prompt the PM to flip the toggle. Do NOT wait. Routines cannot block on human input — if the PM never approved by execution time, the backup owns it.
+- **If checked (ON):** proceed to Step 4.
+
+### Step 3a — Escalation flow (only when Ready=OFF)
+
+Replaces the former separate `mode-3-escalation.md` file. Runs inline in Mode 2.
+
+#### 3a.1 — Pull Preferences fields
+
+- PM identity (for the backup message)
+- Escalation backup: name, channel (Slack or email), ping time
+- Today's dated page URL (the page just fetched in Step 2)
+
+#### 3a.2 — Edge cases (handle before composing)
+
+- **No backup configured.** Slack the PM: "I noticed the Ready toggle isn't on and there's no escalation backup configured. Today's queue was not executed. Add a backup via `PM Task Assignment, change my preference: add [name] as my escalation backup`." Skip 3a.3–3a.5 and exit.
+- **Backup is the PM themselves.** Slack the PM: "Your escalation backup is set to yourself. That won't work. Set someone else via `PM Task Assignment, change my preference: change my escalation backup to [name]`." Skip 3a.3–3a.5 and exit.
+- **Backup Slack handle invalid.** Fall back to email if email is configured. If neither works, Slack the PM that escalation failed and why; exit.
+
+#### 3a.3 — Compose the escalation message
+
+For Slack:
+
+```
+[PM name] hasn't marked today's morning queue ready for execution by [execution time] IST.
+
+This means one of two things:
+  • They're unavailable today (sick, emergency, meeting).
+  • They forgot to flip the Ready toggle.
+
+Can you cover? Review the queue and either:
+  • Flip the Ready toggle yourself if everything looks good — the next scheduled execution check picks it up.
+  • Act on the items manually if you'd rather handle them yourself.
+
+Morning queue: [link to today's dated page]
+Items count: [N]
+```
+
+For email (when backup channel is email):
+
+```
+Subject: Morning queue not marked ready — can you cover for [PM name]?
+
+Hi [Backup name],
+
+[PM name] hasn't marked today's morning queue ready for execution by [execution time] IST. They may be unavailable or forgot to flip the toggle.
+
+Would you mind covering? Open the queue and either:
+  - Flip the "Ready for Execution" toggle at the top of the dated page if the recommendations look right — the next scheduled execution check picks it up.
+  - Act on any items manually if you'd rather handle them yourself.
+
+Queue: [link to today's dated page]
+Items count: [N]
+
+Thanks,
+PM Task Assignment skill
+(Automated message on behalf of [PM name])
+```
+
+#### 3a.4 — Send
+
+- If channel = Slack: use `executors/slack.md` to send to the backup's Slack handle. (Escalation Slack send is one of the few Slack send paths still allowed — it is operational, not a team handoff.)
+- If channel = email: use `executors/email.md` to send directly. (Operational escalation is one of the documented send-not-draft exceptions in `executors/email.md`.)
+
+#### 3a.5 — Log + notify the PM
+
+- Add a note to today's dated page, under the summary line: `Escalation fired at [time] IST. [Backup name] notified via [channel].`
+- Slack DM the PM: `I escalated today's morning queue to [backup name] at [time] IST because the Ready for Execution toggle was still off. If this was unintentional, flip the toggle now and type \`PM Task Assignment, run execution now\` to proceed.`
+- Append a Run Log entry via `writers/run-log.md` with `outcome: escalated`, `reason: ready_toggle_off`, target backup recorded.
+- Exit Mode 2. The backup or PM owns the next move.
+
+#### 3a.6 — Hourly re-check (light)
+
+For 3 hours after escalation, every hour: re-check the Ready toggle silently. If someone flips it ON, fire Mode 2 from Step 4 automatically. After 3 hours, stop re-checking; the rest of the day is manual via `PM Task Assignment, run execution now`. Send the escalation message at most once per day.
 
 ### Step 4 — Read the Morning Queue database
 
@@ -62,9 +136,9 @@ For each row that needs action:
 1. Load the row's detail page content to understand full context (Sources, proposed Orbit task body, proposed Slack, proposed email).
 2. If there's a PM note, feed it to `synthesis/note-interpreter.md` to resolve the intent and override parts of the recommendation.
 3. Route to the appropriate executors based on the action type:
-   - **Orbit operations** (create task, assign, update status, change due date, comment, create project, subtask) → `executors/orbit.md`
-   - **Email** (drafts only, never auto-send) → `executors/email.md`
-   - **Slack** (team handoff, AM ping, PM self-summary) → `executors/slack.md`
+   - **Orbit operations** (create task, assign, update status, change due date, comment, create project, subtask) → `executors/orbit.md`. Due date paths A/B per `references/due-date-categories.md`.
+   - **Email** (drafts only, never auto-send except the documented exceptions) → `executors/email.md`
+   - **Slack** — team and AM handoffs default to `Slack draft appended to Notion` (no Slack API send). Real send only when allowed: PM self-summary, escalation backup ping, or explicit PM `send` note with audience = team. See `executors/slack.md`.
 4. Before calling any executor, pass every string the assignee (delivery team) will read through `writers/plain-language.md` to enforce 4th–5th grade English.
 5. Pass every source reference through `writers/source-citation.md` to ensure proper citation format.
 
@@ -75,10 +149,11 @@ For each row, after all its actions execute:
 1. Flip `Status` to `Done`.
 2. Write the `Outcome` column with a short line describing what was done. Format: concise, specific, include Orbit links where applicable.
    - Examples:
-     - `Task created → Orbit #105892. Slack sent to Vijay. Caitlin emailed.`
-     - `Reassigned from Amit → Rohit. Slack sent to Rohit with context.`
+     - `Task created → Orbit #105892. Slack draft for Vijay appended below. Email draft to Caitlin saved to Gmail.`
+     - `Reassigned from Amit → Rohit. Slack draft for Rohit appended below.`
      - `Email drafted (saved to Gmail drafts — not sent per your note).`
-     - `Task status updated in Orbit. Mannan notified.`
+     - `Task status updated in Orbit. AM draft appended below.`
+3. If a Slack team / AM handoff was produced, the writer appends the draft body under the row's detail page (per `writers/notion.md` Flow — updating rows after Mode 2). The PM copies it from Notion into Slack on their own.
 
 ### Step 8 — Handle failures per row
 
@@ -96,12 +171,12 @@ After all rows are processed (whether success or fail), send a Slack DM to the P
 Your morning queue executed.
 
 ✅ 7 of 9 actions taken:
-  • Agency X homepage task → Vijay
-  • DigitalFirst 3 action items → Ravi + Amit
-  • GrowthLab blog → Ravi (per your note)
-  • CloudBase QA handoff → Mannan
-  • Reply drafted to Jane (Agency X, saved as draft)
-  • AM email sent to Caitlin
+  • Agency X homepage task created → Slack draft for Vijay appended in today's queue
+  • DigitalFirst 3 action items created → Slack drafts for Ravi + Amit appended
+  • GrowthLab blog reassigned to Ravi (per your note) → Slack draft appended
+  • CloudBase QA handoff → Slack draft for Mannan appended
+  • Reply drafted to Jane (Agency X, saved to Gmail drafts)
+  • AM email draft for Caitlin saved to Gmail
 
 ⚠️ 1 held back:
   • TechCo budget alert — your note said "save as draft, check with Caitlin first". Draft saved in Gmail. No other action taken.
@@ -109,7 +184,7 @@ Your morning queue executed.
 ❌ 1 failed:
   • BrightPath proposal — Gmail MCP timed out. Retry by typing `PM Task Assignment, run execution now` or wait for tomorrow.
 
-All Orbit links + Slack thread links in today's Notion page.
+Open today's Notion queue page to copy the Slack drafts and send them to your team / AMs.
 ```
 
 Use `executors/slack.md` to send this DM.

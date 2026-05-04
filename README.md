@@ -36,9 +36,9 @@ PM Automation MVP 1/
 Each PM needs:
 
 1. A Claude account with Cowork enabled.
-2. MCP connections to: Orbit, Gmail, Slack (by Salesforce), Fathom, Notion. All five must be authenticated in Claude.
+2. MCP connections to: Orbit, Gmail, Slack (by Salesforce), Fathom, Notion. All five must be authenticated in Claude. Optional read-only references: Google Drive/Docs/Sheets, SharePoint (used on demand when primary signals link to those documents — see `references/external-doc-access.md`).
 3. A Notion workspace and a parent page where the skill will write morning queues.
-4. The `scheduled-tasks` MCP available in their Cowork environment.
+4. Three Claude Routines configured per `ROUTINE-ENTRYPOINTS.md` (Mode 1, Mode 2, Monthly Archival). Each routine fires on its own cron — there is no in-skill scheduled-tasks dependency.
 
 ## Installation
 
@@ -88,14 +88,14 @@ All answers are written to the `Preferences` sub-page at the bottom of the Notio
 - Plain-language English (4th–5th grade) ONLY for Slack handoffs to the India delivery team and Orbit task bodies. Role-specific technical terms preserved. PMs and AMs get normal professional English.
 - Nothing client-facing sends without your explicit approval.
 - Every sourced document is cited by filename in the output.
-- V3 Notion pages are read-only reference. This skill does not edit them.
+- V3 Notion pages are read-only reference. This skill does not edit them. See `references/v3-context.md`.
 - No availability checking. Skill recommends the most suitable person by role; you override via notes if they're unavailable.
 - Mode 1 never asks questions. Unclear items become their own rows with `Uncertain:` notes.
 
 ## Troubleshooting
 
 **"The skill didn't fire this morning."**
-Your `scheduled-tasks` registration may have expired or the token reset. Type `PM Task Assignment, run morning` to fire Mode 1 manually. The skill will also re-register tomorrow's schedules at the end of that run.
+Check the Mode 1 Claude Routine — it may be paused or its cron may have drifted. Type `PM Task Assignment, run morning` to fire Mode 1 manually for today. Re-enable or fix the routine for tomorrow.
 
 **"A collector failed."**
 If an MCP source is unavailable during Mode 1 (Gmail down, Slack auth expired), the skill continues with what it has and writes a note on today's page: "Gmail unavailable this morning — you may want to check manually." Fix the auth and the next run will pick up everything that was missed (dynamic lookback based on last-run timestamp).
@@ -104,10 +104,10 @@ If an MCP source is unavailable during Mode 1 (Gmail down, Slack auth expired), 
 Check that Ready was ON before the scheduled execution time. If not, type `PM Task Assignment, run execution now` to fire Mode 2 manually.
 
 **"I want the skill to stop running while I'm on planned leave."**
-Type `PM Task Assignment, change my preference: pause the skill until [date]`. Deprecated in v1 — for now, manually remove the scheduled tasks via Cowork settings. Will be built in v1.1.
+Pause the Mode 1 / Mode 2 Claude Routines from the Routines UI for the duration of your leave; re-enable them on return. The skill itself does not pause from inside a routine.
 
 ## Support
 
 Project owner: Ishant Kulshreshtha (ishantk@whitelabeliq.com)
 Design source of truth: [PM Automation MVP 1](https://www.notion.so/3493846840c8805b9424f63dcdc9b9ce)
-Long-term architecture reference (read-only): [PM Automations V3](https://www.notion.so/3433846840c88082b79bf6af6c89a39f)
+Long-term architecture reference (read-only): [PM Automations V3](https://www.notion.so/3433846840c88082b79bf6af6c89a39f) — see `references/v3-context.md` for what lives there and how this skill relates to it.

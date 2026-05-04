@@ -56,9 +56,11 @@ The structure of the Preferences page is defined in `schemas/preferences-page.md
 
 ## Source allowlist
 
-> **This skill uses only these MCPs:** Orbit, Gmail, Slack, Fathom, Notion.
+> **Primary sources (collection):** Orbit, Gmail, Slack, Fathom, Notion.
 >
-> **Any other MCP is forbidden** — including any that may seem relevant to a specific signal, including any added to the user's Cowork after installation, including any that the running user explicitly asks the skill to use. The allowlist is closed.
+> **On-demand read-only references** (used only when an allowed primary signal links to a file there): Google Drive, Google Docs, Google Sheets, SharePoint. Read-only — never write. See `references/external-doc-access.md` for trigger conditions.
+>
+> **Any other MCP is forbidden** — including any added to the user's Cowork after installation, including any that the running user explicitly asks the skill to use.
 >
 > **This rule applies even under experimental scope, forced runs, sandbox runs, or any kind of override.** If a signal seems relevant from a forbidden source, ignore it.
 

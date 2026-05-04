@@ -1,6 +1,6 @@
 > **MANDATORY: `preflight.md` must run before any logic in this file. Do not call any tool, do not act on user input, until preflight has completed successfully. This includes routine triggers — preflight runs even when invoked by a scheduled cloud routine.**
 
-> **Source allowlist (closed):** Orbit, Gmail, Slack, Fathom, Notion. No other MCP, ever — including any that may seem relevant to a specific signal. The allowlist is enforced even under experimental scope or forced runs.
+> **Source allowlist:** Primary collection — Orbit, Gmail, Slack, Fathom, Notion. Read-only references on demand — Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever. The allowlist is enforced even under experimental scope or forced runs.
 
 # Mode 1 — Morning Collection Run
 
@@ -9,9 +9,12 @@
 - Scheduled: daily at the PM's configured morning time (default 9:30 AM IST), fired by a Claude Routine.
 - Manual: `PM Task Assignment, run morning`.
 
-## Zero PM input during this run
+## PM input during this run — surface-dependent
 
-Mode 1 never asks questions. Never blocks waiting for input. Never confirms with the PM. Routines fire unattended — there is no human in the loop at fire time. If something is uncertain, it becomes its own row with an `Uncertain:` note in AI Notes. The PM resolves it when they review.
+Mode 1's question behavior depends on the `is_interactive` flag set during preflight (see `ENVIRONMENTS.md`).
+
+- **Headless surface (`is_interactive = false`):** never asks questions. Never blocks waiting for input. Never confirms with the PM. Routines fire unattended — there is no human in the loop at fire time. If something is uncertain, it becomes its own row with an `Uncertain:` note in AI Notes. The PM resolves it when they review.
+- **Interactive surface (`is_interactive = true`):** may ask **one** clarifying question per ambiguous item before falling back to `Uncertain:`. Use this sparingly; the PM's morning attention is precious. Everything else (write order, plain-language enforcement, Notion structure, run-log) is identical across surfaces.
 
 ## End-to-end flow
 
@@ -125,8 +128,11 @@ Exception: if an MCP source failed, log the note on the page summary so the PM s
 
 ## Performance expectations
 
-- Target end-to-end: under 3 minutes for a typical morning (4 collectors in parallel, 20-50 signals, 10-30 items after synthesis, Notion write).
-- Upper bound: 5 minutes if an unusually large Fathom meeting or 7-day lookback expands the work.
+Accuracy and clean output are primary. Speed is secondary.
+
+- Wall-clock target: complete within 10–15 minutes for a typical morning (4 collectors in parallel, 20–50 signals, 10–30 items after synthesis, Notion write).
+- No hard upper bound. If volume of signals, depth of synthesis, or external-doc fetches demand more time, take it. Better a slow, accurate queue than a fast, half-baked one.
+- The Run Log records actual duration on every fire, so trends are observable and the PM can flag a regression if runs start consistently going beyond 15 minutes.
 
 ## What Mode 1 does NOT do
 
@@ -134,6 +140,6 @@ Exception: if an MCP source failed, log the note on the page summary so the PM s
 - Does not write to Orbit.
 - Does not draft emails.
 - Does not ask the PM anything.
-- Does not touch V3 pages.
+- Does not touch V3 pages. See `references/v3-context.md`.
 - Does not check availability or Keka.
 - Does not use toggles in row detail pages (except the one bottom reference-context toggle per row).

@@ -1,4 +1,4 @@
-> **This collector uses ONLY the relevant MCP from the 6-MCP allowlist. The allowlist is closed: Orbit, Gmail, Slack, Fathom, Notion, scheduled-tasks. No other MCP, ever — including any that may seem relevant to a specific signal.**
+> **This collector uses ONLY the Orbit MCP. Source allowlist — primary collection: Orbit, Gmail, Slack, Fathom, Notion. Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever — including any that may seem relevant to a specific signal.**
 
 > **Preflight (`preflight.md`) must have run before this collector is invoked. Do not call any tool until preflight has completed.**
 
@@ -107,17 +107,17 @@ It's also used by `synthesis/pod-inference.md` to compute candidate assignees pe
 
 ## Tool calls
 
-Use the following Orbit MCP tools:
+Use the following Orbit MCP tools (the `mcp__...orbit.` prefix matches whichever Orbit MCP namespace the user has installed):
 
-- `mcp__a5f9e856-d0f8-45b9-bb59-a9633796f0bd__get_user_details` — for PM identity + assigned projects list
-- `mcp__a5f9e856-d0f8-45b9-bb59-a9633796f0bd__list_projects` — filtered by `project_owner_id`
-- `mcp__a5f9e856-d0f8-45b9-bb59-a9633796f0bd__get_project_details` — for per-project metadata
-- `mcp__a5f9e856-d0f8-45b9-bb59-a9633796f0bd__get_activity_log` — for changes since last run
-- `mcp__a5f9e856-d0f8-45b9-bb59-a9633796f0bd__get_project_task_list` — for overdue / unassigned / new tasks
-- `mcp__a5f9e856-d0f8-45b9-bb59-a9633796f0bd__get_task_details` — for full context on flagged tasks
-- `mcp__a5f9e856-d0f8-45b9-bb59-a9633796f0bd__list_task_comments` — for recent comments
-- `mcp__a5f9e856-d0f8-45b9-bb59-a9633796f0bd__get_asset_attachment_summary_with_download_url` — for attachment summaries (but note: unreliable for non-txt — default to download-and-read per `writers/source-citation.md`)
-- `mcp__a5f9e856-d0f8-45b9-bb59-a9633796f0bd__list_clients`, `list_sub_clients` — for client/sub-client enrichment in the relationship map
+- `mcp__...orbit.get_user_details` — for PM identity + assigned projects list
+- `mcp__...orbit.list_projects` — filtered by `project_owner_id`
+- `mcp__...orbit.get_project_details` — for per-project metadata
+- `mcp__...orbit.get_activity_log` — for changes since last run
+- `mcp__...orbit.get_project_task_list` — for overdue / unassigned / new tasks
+- `mcp__...orbit.get_task_details` — for full context on flagged tasks
+- `mcp__...orbit.list_task_comments` — for recent comments
+- `mcp__...orbit.get_asset_attachment_summary_with_download_url` — for attachment summaries (but note: unreliable for non-txt — default to download-and-read per `writers/source-citation.md`)
+- `mcp__...orbit.list_clients`, `mcp__...orbit.list_sub_clients` — for client/sub-client enrichment in the relationship map
 
 ## Performance
 

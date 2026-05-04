@@ -1,6 +1,6 @@
 > **MANDATORY: `preflight.md` must run before any logic in this file. Do not call any tool, do not act on user input, until preflight has completed successfully. This includes scheduled-task triggers — preflight runs even when invoked by the scheduler.**
 
-> **Source allowlist (closed):** Orbit, Gmail, Slack, Fathom, Notion, scheduled-tasks. No other MCP, ever — including any that may seem relevant to a specific signal. The allowlist is enforced even under experimental scope or forced runs.
+> **Source allowlist:** Primary collection — Orbit, Gmail, Slack, Fathom, Notion. Read-only references on demand — Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever. The allowlist is enforced even under experimental scope or forced runs.
 
 # Note Interpreter
 
@@ -111,6 +111,7 @@ If `confidence = low`, the executors do NOT run. Instead, the row's Outcome colu
 - Update the Orbit task's due date to the parsed date
 - Parse relative dates (`tomorrow`, `next Friday`) against the current date
 - If the note doesn't specify a clear date, flag clarification
+- Pass the task's current `due_date` state into the executor so it can pick Path A (initial set, null → date, no reason needed) vs Path B (date change, fresh reason + category required). See `executors/orbit.md` § Change task due date and `references/due-date-categories.md`.
 
 ## Parsing rules
 

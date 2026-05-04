@@ -122,7 +122,7 @@ Use emojis sparingly and only when they aid scanning or carry mandated structura
 
 | Emoji | Where it's allowed | Why |
 |---|---|---|
-| 📌 🎯 🔗 ✅ 🔍 📎 | Orbit task body section headers — REQUIRED per `schemas/orbit-dq-standard.md` (DO · WHY · CONTEXT · DONE WHEN · SELF-QA · REFS) | Mandated structural markers |
+| 📌 🎯 🔗 ✅ 🔍 📎 | Orbit task body section headers — only when the PM's Preferences sets `orbit_task_header_style: emoji`. Default style (`professional`) uses bold text headers, no emoji. See `schemas/orbit-dq-standard.md`. | Optional structural markers, opt-in per PM |
 | ⚠️ | Warning callouts in Notion (connector failure notices, incident flags) | Visual scanning aid for high-priority alerts |
 | ✓ ✗ | Status indicators in Run Log detail pages (executed / failed) | Compact tabular shorthand |
 | → | Decision-trace arrows in Run Log (`subject → action → reason`) | Compact format marker |

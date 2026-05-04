@@ -98,7 +98,7 @@ The skill writes the answers to a new `Preferences` sub-page on the parent and r
 - [ ] PM successfully invokes `PM Task Assignment, run morning` and sees the first-run setup flow
 - [ ] PM completes the 10 setup questions
 - [ ] `Preferences` sub-page is created on the PM's Notion parent
-- [ ] Scheduled tasks for Mode 1, Mode 2, and monthly archival are registered (visible in Cowork's scheduled-tasks dashboard if available)
+- [ ] Three Claude Routines are created and visible in the Routines UI (Mode 1, Mode 2, Monthly Archival). See `ROUTINE-ENTRYPOINTS.md`.
 - [ ] First scheduled morning run completes the next day
 - [ ] PM reviews the first morning queue and provides feedback
 
@@ -116,7 +116,7 @@ The skill expects a `Preferences` sub-page on the parent. If first-run setup com
 Bug. The source allowlist is supposed to prevent this. Capture the chat transcript and share with the maintainer. The fix is in `config.md` and SKILL.md — confirm both files contain the allowlist clause.
 
 **"Scheduled runs aren't firing."**
-Check the Cowork scheduled-tasks dashboard. The skill registers three scheduled tasks during first-run setup. If they're missing, the scheduled-tasks MCP may have been unavailable at setup time. Manually fire `PM Task Assignment, run morning` once — the skill re-registers schedules at the end of every Mode 1 run.
+Open the Claude Routines UI and confirm the three routines (Mode 1, Mode 2, Monthly Archival) exist, are enabled, and have correct cron expressions per `ROUTINE-ENTRYPOINTS.md`. If a routine is missing, recreate it from the entry-point template. The skill itself does NOT register or repair routines from inside.
 
 ---
 
