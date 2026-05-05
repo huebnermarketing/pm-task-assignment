@@ -21,6 +21,7 @@ Before creating any routine, the operator must have:
   - [ ] Fathom
   - [ ] Notion
 - [ ] **Repo URL** of the public GitHub repo holding the skill — referred to below as `<REPO_URL>` (raw-content base, e.g. `https://raw.githubusercontent.com/<org>/<repo>/main`).
+- [ ] **Pod Matrix Notion page URL** — the read-only org-wide page listing PM-owned and functional matrices (e.g., the public `Matrix Detail` share URL). Used by Mode 1 only for assignee recommendation. Mode 2 and Monthly Archival do not need it.
 - [ ] **Routine TZ — must be IST.** The skill is timezone-locked to **Asia/Kolkata (Indian Standard Time, UTC+05:30)**. All cron expressions, all Preferences-time fields, all Run Log timestamps, and every "today / yesterday / previous-month" calculation in this skill are computed in IST — never UTC, never GMT, never the routine runner's local TZ. If the Routines runner does not natively interpret cron in IST, convert each cron line below from IST to the runner's TZ at routine-creation time so the wall-clock IST fire time stays the same. The skill itself does NOT auto-convert TZ at runtime; the routine runner is responsible for delivering an IST wall-clock fire.
 
 If any item is missing, do not create routines. Stop and resolve first.
@@ -53,13 +54,17 @@ Load and follow these files in order. Prefer local files when present (Claude Co
 Per-PM injected values:
 NOTION_PARENT_PAGE_URL=<INJECTED_VALUE>
 PREFERENCES_PAGE_URL=<INJECTED_VALUE>
+POD_MATRIX_URL=<INJECTED_VALUE>          # Read-only Notion page with the org's pod/matrix structure. Mode 1 only.
 
 Connectors available in this routine (all 5, closed allowlist): Orbit, Gmail, Slack, Fathom, Notion. Do NOT skip any collector. Do NOT use any MCP outside this list, even if it appears authenticated.
 
+Notion read-only exception: Notion access is normally restricted to NOTION_PARENT_PAGE_URL (read + write). For this Mode 1 routine ONLY, you may also notion-fetch POD_MATRIX_URL (read-only). Do NOT write to it. Do NOT enumerate or search around it.
+
 Execute Mode 1 end-to-end:
 - Run preflight Steps 1–6 against the Notion parent and Preferences page (all in IST).
+- Fetch and parse POD_MATRIX_URL once at the start of the run via references/pod-matrix.md; cache the parsed pools (PM matrix, floaters, functional matrices) for the whole run. On fetch or parse failure, log a warning to the Run Log detail page and continue with Orbit-only pod inference (graceful degradation per references/pod-matrix.md).
 - Collect overnight signals from all 5 source connectors per Preferences. Window boundary in IST.
-- Synthesize, group by project, recommend assignees by role-fit only (no availability check).
+- Synthesize, group by project, recommend assignees per synthesis/matcher.md Job 6: history wins → matrix availability → floater availability → cross-matrix Uncertain. Availability (get_user_workload) fires only on the no-history fallback path.
 - Write today's dated queue page on the Notion parent per writers/notion.md, placed at Parent → <Year> → <Month> → <DD Month YYYY> per schemas/parent-page.md (the writer creates the Year and Month container sub-pages on demand if missing).
 - Append a Run Log row + linked detail page via writers/run-log.md.
 

@@ -35,6 +35,15 @@ Extract:
 - If Preferences has a last-run timestamp: lookback = (now − last_run). This handles PM coming back from leave automatically.
 - Cap lookback at 7 days to avoid overwhelming runs.
 
+### Step 2.5 — Load Pod Matrix (cached for the run)
+
+Call `references/pod-matrix.md` to fetch and parse the org Pod Matrix from `POD_MATRIX_URL` (injected by the Mode 1 routine prompt — see `ROUTINE-ENTRYPOINTS.md`).
+
+- On success: cache the parsed pools (PM matrix, floaters, functional matrices) plus the resolved Orbit user-id mapping for the rest of the run. `synthesis/pod-inference.md` reads from this cache.
+- On `POD_MATRIX_URL` absent (interactive surface or routine misconfiguration), fetch failure, or parse failure: log a one-line warning to the Run Log Decisions trace and continue. Pod-inference will gracefully degrade to Orbit-only inference (matrix-unavailable code path).
+
+This step is non-blocking: a matrix outage must never block the morning queue.
+
 ### Step 3 — Fire collectors in parallel
 
 Call all four collectors. Do not wait for one before starting the next — they're independent.
@@ -58,16 +67,16 @@ Feed all collected signals into `synthesis/matcher.md`. The matcher:
 - Generates a one-line plain-language summary per item (normal English — PM reads this)
 - Flags items as `Uncertain:` when it can't confidently group or classify
 - Recommends an action per item
-- Calls `synthesis/pod-inference.md` to compute the candidate pool per project
-- Calls the recommendation logic to pick the single best assignee (no availability check — role fit only)
-- Writes AI Notes as needed
+- Calls `synthesis/pod-inference.md` to compute the candidate pool per project (matrix members ∪ Orbit followers/recent-assignees)
+- Picks the assignee via the 4-branch decision tree in `synthesis/matcher.md` Job 6: history wins → matrix availability → floater availability → cross-matrix Uncertain. Availability calls (`get_user_workload`) fire only on the no-history fallback path.
+- Writes AI Notes as needed (including any matrix-unavailable degradation note)
 
 ### Step 5 — Write to Notion
 
 Call `writers/notion.md` to:
 1. Archive last month's dated pages if today is the 1st (route to `modes/monthly-archival.md` first, then return)
 2. Ensure `Preferences` sub-page is positioned at the very bottom of the parent
-3. Create today's dated sub-page at the TOP of the parent, titled `[DD Month YYYY]` (e.g., `25 April 2026`). **If a page with today's date already exists, do NOT overwrite and do NOT prompt.** Append a numeric rerun suffix and create a new page: `25 April 2026 (rerun 2)`, `25 April 2026 (rerun 3)`, etc. Pick the lowest unused suffix. The original page is left untouched.
+3. Resolve / create the Year heading-toggle block on the parent body (e.g., `2026`). Resolve / create the Month heading-toggle block inside it (e.g., `April`). Create today's dated sub-page (Notion-tree parent = parent page) and insert its `child_page` block at the TOP of the Month toggle's children. Title format: `DD Month YYYY` (e.g., `25 April 2026`). Per `schemas/parent-page.md` for the hybrid Year/Month-toggle + Day-sub-page structure. **If a `child_page` block matching today's title already exists in that Month toggle, do NOT overwrite and do NOT prompt.** Append a numeric rerun suffix and create a new sub-page: `25 April 2026 (rerun 2)`, `25 April 2026 (rerun 3)`, etc. Pick the lowest unused suffix. The original page is left untouched.
 4. Write content into today's page:
    a. **Top of page: `Ready for Execution` toggle** — a to-do-style checkbox block, unchecked by default, labeled clearly
    b. **Summary line** — "N items for your morning. X new assignments, Y reassignments, Z FYI."
@@ -141,5 +150,7 @@ Accuracy and clean output are primary. Speed is secondary.
 - Does not draft emails.
 - Does not ask the PM anything.
 - Does not touch V3 pages. See `references/v3-context.md`.
-- Does not check availability or Keka.
+- Does not consult Keka or any leave data.
+- Does not check availability proactively. Availability (`get_user_workload`) is called lazily by `synthesis/pod-inference.md` only on the matcher's no-history fallback path per `SKILL.md` non-negotiable rule #6.
+- Does not write to the Pod Matrix Notion page — read-only via `references/pod-matrix.md`.
 - Does not use toggles in row detail pages (except the one bottom reference-context toggle per row).

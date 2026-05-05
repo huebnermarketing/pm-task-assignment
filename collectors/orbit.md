@@ -118,6 +118,8 @@ Use the following Orbit MCP tools (the `mcp__...orbit.` prefix matches whichever
 - `mcp__...orbit.list_task_comments` — for recent comments
 - `mcp__...orbit.get_asset_attachment_summary_with_download_url` — for attachment summaries (but note: unreliable for non-txt — default to download-and-read per `writers/source-citation.md`)
 - `mcp__...orbit.list_clients`, `mcp__...orbit.list_sub_clients` — for client/sub-client enrichment in the relationship map
+- `mcp__...orbit.list_users` — for matrix-name → user_id resolution. Called once per Mode 1 run by `references/pod-matrix.md`; the user list is cached for the duration of the run.
+- `mcp__...orbit.get_user_workload` — invoked **on-demand** by `synthesis/pod-inference.md` (NOT in the bulk per-run pull). Used only when `synthesis/matcher.md` Job 6 hits the no-history fallback path and needs an availability score for a small subset of role-fit candidates. Subject to the same retry policy.
 
 ## Performance
 
@@ -137,3 +139,4 @@ Projects universe is capped at \~400 (the typical WLIQ follower count). Most day
 - Does not synthesize or group signals. That's the matcher's job.
 - Does not dedup against other sources. Each source collector is independent.
 - Does not filter by urgency or importance. Every relevant signal is returned.
+- Does not collect workload proactively. `get_user_workload` is called lazily by pod-inference on a small candidate subset only when the matcher requests an availability check (per `SKILL.md` non-negotiable rule #6).

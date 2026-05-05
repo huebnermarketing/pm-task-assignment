@@ -87,16 +87,17 @@ Verify the persistent operational children of the Notion parent. Create any that
 2. **`Incidents` sub-page** — append-only inline database per `schemas/parent-page.md` § Incidents. Holds connector-failure rows from Tier 4 of `connector-failure-notify.md`.
 3. **`Preferences` sub-page** — must be the very last child of the parent. If it's not last, move it to the end.
 
-After creation/verification, the bottom three children of the parent (in order) must be: `Run Log`, `Incidents`, `Preferences`. Year sub-pages, when present, sit above all three.
+After creation/verification, the bottom three `child_page` blocks on the parent body (in order) must be: `Run Log`, `Incidents`, `Preferences`. Year heading-toggle blocks, when present, sit above all three.
 
-**Hierarchy note (do NOT enforce in preflight):** preflight does NOT auto-create the current Year or Month sub-page, and does NOT auto-relocate flat dated pages found at the parent level. That's `writers/notion.md`'s job at write time, plus drift surfacing during `modes/monthly-archival.md`. Preflight only confirms `Run Log`, `Incidents`, `Preferences` exist and are correctly positioned — it does not touch dated content.
+**Hierarchy note (do NOT enforce in preflight):** preflight does NOT create or touch Year/Month heading-toggle blocks on the parent body, does NOT verify dated sub-page placement inside Month toggles, and does NOT auto-relocate flat dated pages found outside the toggle structure. That's `writers/notion.md`'s job at Mode 1 write time, plus drift surfacing during `modes/monthly-archival.md`. Preflight only confirms the three operational sub-pages (`Run Log`, `Incidents`, `Preferences`) exist and that their `child_page` blocks sit in the correct order at the bottom of the parent body — it does not touch dated content or toggle blocks.
 
 ## What preflight does NOT do
 
 - Does NOT execute any morning collection logic, executor logic, or write any task data. That happens after preflight returns control.
 - Does NOT modify Preferences.
 - Does NOT modify config.
-- Does NOT call any tool from outside the source allowlist (5 primary MCPs + 4 read-only reference MCPs per `references/external-doc-access.md`).
+- Does NOT call any tool from outside the source allowlist (5 primary MCPs + 4 read-only reference MCPs per `references/external-doc-access.md` + the read-only Pod Matrix exception per `references/pod-matrix.md`).
+- Does NOT fetch the Pod Matrix page. That is fetched by `modes/mode-1-morning-collection.md` Step 2.5 via `references/pod-matrix.md` (cached for the run). Mode 2 and Monthly Archival never fetch it.
 
 ## Identity check (also part of preflight, in step 5)
 

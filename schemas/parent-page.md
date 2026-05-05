@@ -21,36 +21,50 @@ See also:
 │  [PM's execution run time] IST. Last run: [timestamp]."     │
 └─────────────────────────────────────────────────────────────┘
 
-📂 [Current Year]                              ← e.g., "2026"
-   📂 [Current Month]                          ← e.g., "April"
-      📅 [Today's dated page]                   ← created/refreshed daily by Mode 1
-      📅 [Yesterday's dated page]
-      📅 [Day before's dated page]
+▼ 2026                                              ← H1 heading-toggle block on parent body
+   ▼ April                                          ← H2 heading-toggle nested inside Year toggle
+      📅 25 April 2026                              ← page-link block (Day sub-page lives here)
+      📅 24 April 2026
       ...
-      📅 [Older dated pages from this month]
-   📂 [Previous Month, same year]              ← e.g., "March"
-      📅 [dated pages]
-   📂 [Earlier months in the year]
-      📅 [dated pages]
+      📅 1 April 2026
+   ▼ March                                          ← H2 heading-toggle (collapsed by default)
+      📅 dated page links
+   ▶ February (collapsed)
+   ▶ January (collapsed)
 
-📂 [Previous Year]                              ← e.g., "2025"
-   📂 [December]
-      📅 [dated pages]
-   📂 [Earlier months]
+▶ 2025 (collapsed)                                  ← Older years collapsed by default
+   ▶ December
    ...
 
-... older years ...
-
-📒 Run Log         ← routine-fire log + linked detail pages (auto-written)
-🚨 Incidents       ← append-only connector-failure log (Tier 4 fallback)
-⚙️ Preferences (always last)
+📒 Run Log         ← sub-page (unchanged) — routine-fire log + linked detail pages
+🚨 Incidents       ← sub-page (unchanged) — append-only connector-failure log (Tier 4 fallback)
+⚙️ Preferences     ← sub-page (unchanged) — always last
 ```
 
-**Hierarchy rule (non-negotiable):** every dated page lives at depth 3 under the parent — `Parent → Year → Month → Date`. There are no flat dated pages directly under the parent. The hierarchy is enforced from creation time, not lazily by archival.
+## The hybrid hierarchy — read this carefully
+
+Year and Month containers are **heading-toggle blocks on the parent's body content**, not sub-pages. The Year/Month structure is purely visual organization on the parent page; it does NOT create sub-pages in the Notion sidebar tree.
+
+Day pages are still **sub-pages**. Their Notion-tree parent is the parent page itself (so they show up in the parent's sidebar children list). Their visual location on the parent page body is inside the Year toggle → Month toggle nesting.
+
+| Layer | Notion type | Notion-tree parent | Where it appears |
+|---|---|---|---|
+| Year (e.g., `2026`) | Heading-1 toggle block | n/a — block, not a page | Inside parent body, descending year order |
+| Month (e.g., `April`) | Heading-2 toggle block | n/a — block, not a page | Inside its Year toggle, descending month order |
+| Date (e.g., `25 April 2026`) | Sub-page (`child_page` block) | Parent page | Sidebar: flat under parent. Body: page-link block inside the relevant Month toggle |
+| Row detail | Sub-page | Date sub-page | Sidebar: under Date. Body: opened from row in inline Morning Queue |
+| Run Log | Sub-page | Parent page | Sidebar: under parent. Body: bottom of parent above Incidents |
+| Run Log detail | Sub-page | Run Log sub-page | Sidebar: under Run Log. Body: opened from Run Log inline DB row |
+| Incidents | Sub-page | Parent page | Sidebar: under parent, below Run Log |
+| Preferences | Sub-page | Parent page | Sidebar: under parent. Body: bottom of parent (always last) |
+
+**Why hybrid:** toggle blocks let the PM scan the whole year on a single page (open the right Year/Month, see all the dates) without clicking into nested sub-pages. Day pages stay as sub-pages because (a) Mode 2 needs a stable URL per day, (b) row detail pages live as children of the day page, (c) the day page contains an inline database (Morning Queue) which renders better as a full page than nested deep in toggles.
+
+**Sidebar consequence:** the parent's sidebar children list will accumulate one entry per day plus Run Log / Incidents / Preferences. After a year of use, ~365 day sub-pages live flat under the parent in the sidebar. This is by design — sidebar is not the primary navigation surface; the parent page body's Year/Month toggle structure is.
 
 ## Static elements (always present)
 
-### 1. Header callout — at the very top
+### 1. Header callout — at the very top of parent body
 
 A Notion callout block. Updated by Mode 1 every morning (the timestamp at minimum). Content:
 
@@ -67,23 +81,26 @@ If the skill detected connector failures or other issues at the last run, the he
 ⚠️ Last run had issues — see today's page for details.
 ```
 
-The header is the only static, persistent block on the parent. Everything else under it is either dated pages, the operational sub-pages (`Run Log`, `Incidents`), or the `Preferences` page.
+The header is the only static, persistent block at the very top of the parent body.
 
-### 2. Run Log sub-page — second-to-last static block
+### 2. Run Log sub-page — second-to-last static sub-page
 
 - **Title:** exactly `Run Log` (no emoji, no suffix — the writer matches by exact title).
+- **Notion-tree parent:** the parent page (sidebar shows it as a direct child of parent).
+- **Body location on parent:** below all Year toggle blocks, immediately above `Incidents`. Represented on parent body as a `child_page` block.
 - **Contents:**
   1. A one-paragraph header callout at the top of the page reading approximately:
      > "This page is auto-written by the PM Task Assignment skill on every routine fire. Do not edit rows manually — manual edits will be overwritten or ignored. To investigate a specific fire, click into its row to open the detail page."
   2. An inline Notion database below the callout. Schema is in `schemas/run-log-database.md`.
 - **Sort:** the inline database default view sorts by `Started` descending (newest fire at the top).
-- **Detail pages:** each row in the inline database opens a child page whose schema is in `schemas/run-log-detail-page.md`. Detail pages are nested as children of THIS sub-page (not of the parent), which keeps the parent tidy — the parent only ever has the top-level children listed in the order rules below.
+- **Detail pages:** each row in the inline database opens a child page whose schema is in `schemas/run-log-detail-page.md`. Detail pages are nested as children of THIS sub-page (not of the parent), which keeps the parent tidy.
 - **Lifecycle:** created on first preflight if missing (per `preflight.md` Step 6). Once it exists, the writer (`writers/run-log.md`) appends a row on every fire.
-- **Position:** below all Year sub-pages and immediately above `Incidents`.
 
 ### 3. Incidents sub-page — between Run Log and Preferences
 
 - **Title:** exactly `Incidents`.
+- **Notion-tree parent:** the parent page.
+- **Body location on parent:** between Run Log and Preferences.
 - **Contents:** an append-only inline Notion database. No header callout required — the title is self-explanatory. Columns:
 
   | Column              | Type                       | Notes                                                                                       |
@@ -101,11 +118,10 @@ The header is the only static, persistent block on the parent. Everything else u
 - **Lifecycle:** created on first preflight if missing (per `preflight.md` Step 6), OR on first incident if it doesn't exist yet (the connector-failure path in `connector-failure-notify.md` Tier 4 will create-or-append).
 - **Read on every fire:** preflight loads unresolved incidents and surfaces them in the new run-log entry's "Pre-existing unresolved incidents" field, so each fire is aware of standing failures.
 - **Escalation:** 3+ consecutive unresolved incidents on the same `MCP` trigger a Slack escalation to the backup person — already documented in `connector-failure-notify.md`.
-- **Position:** below `Run Log` and immediately above `Preferences`.
 
 ### 4. Preferences sub-page — always last
 
-The `Preferences` sub-page is the very last child of the parent. Position is enforced by:
+The `Preferences` sub-page is the very last child of the parent (sidebar tree) and the last block on the parent body. Position is enforced by:
 
 - `writers/notion.md` Step 1 of the Mode 1 flow: confirm Preferences is at the bottom; move it if not.
 - `preflight.md` Step 6: re-confirm Preferences is last after creating/positioning `Run Log` and `Incidents`.
@@ -113,109 +129,112 @@ The `Preferences` sub-page is the very last child of the parent. Position is enf
 
 ## Dynamic elements (created and managed by the skill)
 
-### Year sub-page — top of parent
+### Year toggle block — top of parent body
 
-A Year page (e.g., `2026`) is the outermost dated container. The current Year page sits at the TOP of the parent, above earlier Year pages. Title is the bare 4-digit year — no prefix, no suffix.
+A Year toggle block (e.g., `2026`) is the outermost dated container on the parent body. The current Year toggle sits at the TOP of the parent body (just below the header callout), above earlier Year toggles. Title is the bare 4-digit year — no prefix, no suffix.
 
-**Lifecycle:** created on demand by Mode 1 (or any writer that needs to place a dated page) when no Year page for the current year exists. Idempotent — never created twice.
+- **Notion type:** Heading-1 toggle (`heading_1` block with `is_toggleable: true`). Falls back to a regular toggle block if the writer cannot create heading-toggles via the MCP — schema is permissive, but heading-toggle is preferred for visual hierarchy.
+- **Default state:** current year expanded; older years collapsed.
+- **Lifecycle:** created on demand by `writers/notion.md` (or any writer that needs to place a dated page) when no Year toggle for the current year exists. Idempotent — never created twice.
 
-### Month sub-page — under Year
+### Month toggle block — inside Year
 
-A Month page (e.g., `April`) lives inside its parent Year page. Title is the spelled-out month name only (e.g., `April`, not `04`, `Apr`, or `April 2026`). The year context is implicit from the Year parent.
+A Month toggle block (e.g., `April`) lives inside its Year toggle on the parent body. Title is the spelled-out month name only (e.g., `April`, not `04`, `Apr`, or `April 2026`). The year context is implicit from the Year toggle wrapping it.
 
-**Order under the Year:** newest month at the top, descending. So inside `2026` you see `April → March → February → January` top-to-bottom.
+- **Notion type:** Heading-2 toggle (`heading_2` block with `is_toggleable: true`).
+- **Order inside the Year toggle:** newest month at the top, descending. So inside `2026` you see `April → March → February → January` top-to-bottom.
+- **Default state:** current month expanded; older months collapsed.
+- **Lifecycle:** created on demand when no Month toggle for the current month exists inside the current Year toggle. Idempotent.
 
-**Lifecycle:** created on demand when no Month page for the current month exists under the current Year page. Idempotent.
+### Dated sub-page — page-link inside Month toggle
 
-### Dated sub-page — under Month
+Each Mode 1 run creates (or refreshes) a dated sub-page titled with the date in `DD Month YYYY` format (e.g., `25 April 2026`).
 
-Each Mode 1 run creates (or refreshes) a dated sub-page titled with the date in `DD Month YYYY` format (e.g., `25 April 2026`). The dated page is the child of the Month page, which is the child of the Year page, which is the child of the parent.
-
-New dated pages go at the TOP of their Month page's children (newest at top within the month).
-
-Layout of each dated page is defined in this file (parent-page.md) by reference, but the actual structure is in:
-- The dated page itself contains the inline `Morning Queue` database — schema in `schemas/morning-queue-database.md`
-- Each row in that database opens to a row detail page — schema in `schemas/row-detail-page.md`
+- **Notion-tree parent:** the parent page (NOT a Month sub-page — there are no Month sub-pages).
+- **Page-link block placement on parent body:** as a `child_page` block, placed at the TOP of the relevant Month toggle's children. Newest date at top within the month.
+- **Sidebar appearance:** under the parent page in the Notion sidebar, alongside other day sub-pages.
+- **Page contents:** the inline `Morning Queue` database — schema in `schemas/morning-queue-database.md`. Each row in that database opens to a row detail page — schema in `schemas/row-detail-page.md`.
 
 ### Resolving "where does today's dated page go?"
 
 On every Mode 1 fire (and any manual write that creates a dated page):
 
 1. Compute current `YYYY`, `Month` (spelled out), and `DD Month YYYY` title.
-2. Look for a child of the parent titled exactly `YYYY`. If absent, create it at the top of the parent.
-3. Inside that Year page, look for a child titled exactly `Month`. If absent, create it at the top of the Year page.
-4. Inside that Month page, create or refresh the `DD Month YYYY` page at the top.
+2. Fetch the parent's body block tree.
+3. Look for a Heading-1 toggle block on the parent body whose plain-text content is exactly `YYYY`. If absent, create it at the top of the parent body (immediately below the header callout). If multiple match, log to run-log and use the topmost.
+4. Inside that Year toggle's children, look for a Heading-2 toggle block whose plain-text content is exactly `Month`. If absent, create it at the top of the Year toggle. If multiple match, log + use topmost.
+5. Create the dated sub-page (`notion-create-pages` with parent = the Parent page). Insert its `child_page` block at the top of the Month toggle's children. If a `child_page` block matching today's title already exists in that Month toggle, reuse — do not create a duplicate (the rerun-suffix flow in `writers/notion.md` handles intentional reruns).
 
 This sequence is the single source of truth for placement. Placement is correct from creation — the skill does NOT lazily flatten dated pages and archive them later. Monthly archival (`modes/monthly-archival.md`) only verifies nothing has drifted out of place.
 
-After several months of use, the parent looks like:
+After several months of use, the parent body looks like:
 
 ```
 HEADER CALLOUT
-📂 2026
-   📂 April
+▼ 2026
+   ▼ April
       📅 25 April 2026
       📅 24 April 2026
       ...
       📅 1 April 2026
-   📂 March
-      📅 31 March 2026
-      ...
-   📂 February
-   📂 January
-📂 2025
-   📂 December
-   📂 November
+   ▶ March
+   ▶ February
+   ▶ January
+▶ 2025
+   ▶ December
    ...
-📒 Run Log
-🚨 Incidents
-⚙️ Preferences
+📒 Run Log         (child_page block — sub-page)
+🚨 Incidents       (child_page block — sub-page)
+⚙️ Preferences     (child_page block — sub-page)
 ```
 
-## What the parent must NOT contain
+## What the parent must NOT contain (on the body)
 
-- No other content blocks at the parent level (no extra databases, no orphan blocks)
-- No PM-added arbitrary content at the parent level (PMs can add content INSIDE Preferences or inside dated pages, but not at the parent level itself)
-- **No flat dated pages directly under the parent** — every dated page lives at `Year → Month → Date` depth
-- **No flat Month pages directly under the parent** — every Month page lives inside a Year page
-- **No `[Month YYYY]` toggle blocks at the parent level** (legacy structure superseded by Year/Month sub-pages)
+- No other content blocks at the parent body level outside the structure above (no extra databases, no orphan blocks, no PM-added text content)
+- **No flat dated `child_page` blocks at the parent body level** — every dated page-link must sit inside a Month toggle inside a Year toggle. Day sub-pages whose Notion-tree parent is the parent are expected, but their `child_page` block on the parent body must be inside the right Year/Month toggle.
+- **No flat Month toggles at the parent body level** — every Month toggle must sit inside a Year toggle.
+- **No legacy Year/Month sub-pages** — if the parent contains older `2025` / `April` sub-pages from a prior schema version, they are migration drift. Surface in run-log; the writer does NOT auto-migrate.
+- **No `[Month YYYY]` toggle blocks at the parent level** (legacy structure superseded by Year/Month toggle nesting)
 - No `Run Log` detail pages at the parent level — those must be nested under the `Run Log` sub-page
 
 The skill enforces this on every routine fire by:
 
 1. Verifying the header callout exists (creating or updating it if needed)
-2. Verifying the current Year page exists at the top of the parent (creating it if missing)
-3. Verifying the current Month page exists inside the Year page (creating it if missing)
-4. Verifying today's dated page is at the top of the Month page (creating or moving it if needed)
-5. Verifying `Run Log` exists and sits below all Year pages (creating it if missing — see `preflight.md` Step 6)
-6. Verifying `Incidents` exists and sits below `Run Log` (creating it if missing — see `preflight.md` Step 6)
-7. Verifying `Preferences` is at the bottom
+2. Verifying the current Year toggle block exists at the top of the parent body (creating it if missing)
+3. Verifying the current Month toggle exists inside the Year toggle (creating it if missing)
+4. Verifying today's dated `child_page` block is at the top of the Month toggle (creating or moving it if needed)
+5. Verifying `Run Log` exists as a sub-page and its `child_page` block sits below all Year toggles, above `Incidents` (creating the sub-page if missing — see `preflight.md` Step 6)
+6. Verifying `Incidents` exists as a sub-page and its `child_page` block sits below `Run Log` (creating if missing — see `preflight.md` Step 6)
+7. Verifying `Preferences` `child_page` block is the last block on the parent body
 8. Logging (but not removing) any unexpected content at the parent level so the PM can investigate
-9. Logging (but not auto-moving) any flat dated page found at the parent level — surfaces it in the run-log so the PM can confirm before relocation
+9. Logging (but not auto-moving) any flat dated page-link found at the parent body level outside the toggle structure — surfaces it in the run-log so the PM can confirm before relocation
 
 ## Visual hierarchy and order — strict rules
 
-The parent has these ordered top-level children:
+The parent body has these ordered top-level blocks:
 
-| #  | Section                          | Created/refreshed by                              | Notes                                                  |
-| -- | -------------------------------- | ------------------------------------------------- | ------------------------------------------------------ |
-| 1  | Header callout                   | Mode 1 daily; preflight on every fire             | Always first.                                          |
-| 2  | Current Year sub-page            | Mode 1 / writers/notion.md on demand              | Newest year at top. Contains Month sub-pages.          |
-| 3  | Earlier Year sub-pages           | Prior Mode 1 runs in those years                  | Descending year order.                                 |
-| 4  | `Run Log` sub-page               | `preflight.md` Step 6 (creates if missing)        | Below all Year sub-pages, above `Incidents`.           |
-| 5  | `Incidents` sub-page             | `preflight.md` Step 6 OR Tier 4 of failure path   | Between `Run Log` and `Preferences`.                   |
-| 6  | `Preferences`                    | PM-curated; position enforced                     | Always last.                                           |
+| #  | Block                            | Type                              | Created/refreshed by                              | Notes                                                  |
+| -- | -------------------------------- | --------------------------------- | ------------------------------------------------- | ------------------------------------------------------ |
+| 1  | Header callout                   | Callout block                     | Mode 1 daily; preflight on every fire             | Always first.                                          |
+| 2  | Current Year toggle              | Heading-1 toggle                  | Mode 1 / writers/notion.md on demand              | Newest year at top. Contains Month toggles.            |
+| 3  | Earlier Year toggles             | Heading-1 toggle                  | Prior Mode 1 runs in those years                  | Descending year order.                                 |
+| 4  | `Run Log` sub-page link          | `child_page` block                | `preflight.md` Step 6 (creates if missing)        | Below all Year toggles, above `Incidents`.             |
+| 5  | `Incidents` sub-page link        | `child_page` block                | `preflight.md` Step 6 OR Tier 4 of failure path   | Between `Run Log` and `Preferences`.                   |
+| 6  | `Preferences` sub-page link      | `child_page` block                | PM-curated; position enforced                     | Always last.                                           |
 
-**Hierarchy nesting:** Year sub-pages contain Month sub-pages (descending), Month sub-pages contain Date sub-pages (descending). The parent itself only ever has the children listed in the table above — nothing else.
+**Hierarchy nesting on parent body:** Year toggles contain Month toggles (descending), Month toggles contain dated `child_page` blocks (descending). The parent body itself only ever has the blocks listed in the table above — nothing else.
 
-Mode 1's Notion writer enforces this order. `preflight.md` Step 6 creates `Run Log` and `Incidents` in the correct slot if either is missing on a routine fire. Monthly archival verifies (rather than reshuffles) the structure since placement is correct from creation. If a PM manually rearranges, the next routine fire silently re-sorts top-level children; flat dated/month pages found at the parent level are flagged in the run-log for PM review rather than auto-moved.
+**Sidebar tree under the parent (informational):** all dated sub-pages flat (one per day), plus the three operational sub-pages (Run Log, Incidents, Preferences). Run Log detail pages are children of Run Log (not parent). Row detail pages are children of their respective dated sub-page (not parent). The sidebar is informational; navigation happens via the parent body.
+
+Mode 1's Notion writer enforces this order. `preflight.md` Step 6 creates `Run Log` and `Incidents` in the correct slot if either is missing on a routine fire. Monthly archival verifies (rather than reshuffles) the structure since placement is correct from creation. If a PM manually rearranges, the next routine fire silently re-sorts top-level blocks and toggle children; flat dated/month pages found at the parent level are flagged in the run-log for PM review rather than auto-moved.
 
 ## Why the structure is fixed
 
 - **Predictability:** every PM's parent looks the same. Onboarding new PMs is faster because the layout is recognizable.
 - **Skill reliability:** the skill always knows where to find things. It doesn't have to guess.
-- **Audit-friendly:** anyone (PM, leadership, fellow PM) can open a parent page and immediately understand what they're looking at.
-- **Archival is clean:** the Year/Month nesting keeps the parent's top-level child count bounded (one entry per active year), no matter how many dated pages accumulate.
+- **Audit-friendly:** anyone (PM, leadership, fellow PM) can open a parent page and immediately see the whole year by expanding/collapsing toggles.
+- **Scan-on-one-page:** Year/Month toggles let the PM see the entire history without clicking into sub-pages — major UX improvement over the prior all-sub-page schema.
+- **Stable URLs preserved:** day sub-pages keep their stable URL contract for Mode 2 and for any manual link-shares the PM does.
 
 ## What this schema does NOT include
 
@@ -225,3 +244,14 @@ Mode 1's Notion writer enforces this order. `preflight.md` Step 6 creates `Run L
 - A "drafts" section or "ideas" section at the parent level (everything goes through dated pages)
 
 If a PM wants additional content at the parent level, they should add it INSIDE the Preferences page under a custom heading. The skill won't touch their custom content there.
+
+## Migration note (from prior all-sub-page schema)
+
+Earlier installs created Year and Month as sub-pages instead of toggle blocks. If the writer encounters legacy Year/Month sub-pages on a parent during a Mode 1 fire:
+
+- Log the drift in the run-log detail page (`Legacy Year sub-page found at parent: <year>` or `Legacy Month sub-page found at parent: <year>/<month>`).
+- Do NOT auto-migrate the dated pages out of the legacy sub-page hierarchy.
+- Surface to the PM via the run-log so they can decide whether to re-home dated pages manually.
+- New dated pages going forward use the toggle-based structure regardless of legacy presence.
+
+The PM completes the migration manually (or via a one-time operator script) — the skill stays read-only on legacy structure to prevent accidental data movement.

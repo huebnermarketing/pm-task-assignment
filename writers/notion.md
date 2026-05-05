@@ -6,7 +6,7 @@
 
 ## Purpose
 
-All Notion write operations. Creates and reuses Year and Month container pages, places dated sub-pages inside `Parent → Year → Month → Date` hierarchy, builds the inline Morning Queue database, populates row detail pages, updates status and outcome columns, ensures Preferences stays at the bottom, and verifies the structure on monthly archival.
+All Notion write operations. Creates and reuses **Year and Month heading-toggle blocks** on the parent page body (NOT sub-pages — see `schemas/parent-page.md` for the hybrid hierarchy). Places dated sub-pages with parent = the parent page, and inserts each dated sub-page's `child_page` block inside the relevant Month toggle. Builds the inline Morning Queue database on each dated sub-page, populates row detail sub-pages, updates status and outcome columns, ensures Preferences stays at the bottom, and verifies the structure on monthly archival.
 
 ## Tools used
 
@@ -23,28 +23,32 @@ Called after the matcher has produced the ordered list of items.
 
 ### Step 1 — Confirm Preferences at bottom of parent
 
-Fetch the parent page. Get the list of child blocks. If `Preferences` isn't the last child block, move it to the end.
+Fetch the parent page block tree. Confirm the `Preferences` `child_page` block is the last block on the parent body. If not, move it to the end via `notion-update-page` block-reorder.
 
-### Step 2 — Resolve / create the Year container
+### Step 2 — Resolve / create the Year toggle block
 
 - Compute current `YYYY` (4-digit, e.g., `2026`).
-- Look for a child of the parent titled exactly `YYYY` (no prefix/suffix).
-- If absent: create it via `notion-create-pages` with parent = PM's parent page. Title = `YYYY`. Icon = 📂. Position at the TOP of the parent's children, above any earlier Year pages.
-- If present: reuse — never create a duplicate. If somehow more than one exists, log to run-log; use the topmost and skip duplicates (PM resolves manually).
+- Fetch the parent's body block tree.
+- Look for a Heading-1 toggle block (`heading_1` with `is_toggleable: true`) on the parent body whose plain-text content is exactly `YYYY` (no prefix, no suffix).
+- If absent: insert one at the top of the parent body, immediately below the header callout, above any earlier Year toggles. Use `notion-update-page` to append the new block, then move it into position. Default state: expanded.
+- If present: reuse — never create a duplicate. If multiple match, log to run-log, use the topmost, leave the duplicates alone for PM review.
+- **Legacy detection:** if a sub-page (`child_page` block) titled `YYYY` exists on the parent body instead of a toggle block, log to run-log as `Legacy Year sub-page detected: <year>`. Create the new toggle block in the correct position; the legacy sub-page is left untouched (no auto-migration).
 
-### Step 3 — Resolve / create the Month container
+### Step 3 — Resolve / create the Month toggle block
 
 - Compute current `Month` spelled out (e.g., `April`).
-- Look for a child of the Year page titled exactly `Month` (spelled out, no year suffix).
-- If absent: create it via `notion-create-pages` with parent = the Year page. Title = `Month`. Icon = 📂. Position at the TOP of the Year page's children, above earlier Month pages.
-- If present: reuse — same dup rule as Year.
+- Fetch the Year toggle's children blocks.
+- Look for a Heading-2 toggle block (`heading_2` with `is_toggleable: true`) inside the Year toggle whose plain-text content is exactly `Month` (spelled out, no year suffix).
+- If absent: insert one at the TOP of the Year toggle's children, above earlier Month toggles. Default state: expanded.
+- If present: reuse — same dup + legacy rule as Year.
 
 ### Step 4 — Create today's dated sub-page
 
 - **Title:** today's date in "DD Month YYYY" format. Example: `25 April 2026`.
 - **Icon:** 📅
-- **Parent:** the Month page resolved in Step 3 (NOT the PM's parent page).
-- **Position:** at the TOP of the Month page's children, above older dated pages from the same month.
+- **Notion-tree parent:** the parent page (use `notion-create-pages` with `parent` = `DEFAULT_NOTION_PARENT_PAGE_ID`). The dated sub-page is a direct child of the parent in the Notion sidebar tree.
+- **Body-block placement on parent:** insert the resulting `child_page` block at the TOP of the Month toggle's children (above older dated `child_page` blocks from the same month). Use `notion-update-page` block-append + reorder.
+- **Idempotency:** before creating, scan the Month toggle's children for an existing `child_page` block with the same title. If one exists and the run is intentional (PM-fired re-run), append a numeric rerun suffix per the existing flow: `25 April 2026 (rerun 2)`, `(rerun 3)`, etc. Pick the lowest unused suffix.
 
 ### Step 5 — Write the page body
 
@@ -107,14 +111,17 @@ For each row Mode 2 executed:
 
 ## Flow — monthly archival (1st of month)
 
-See `modes/monthly-archival.md` for the orchestration. Because every dated page is created inside `Parent → Year → Month → Date`, archival is **verification**, not migration. The Notion Writer's role on archival day:
+See `modes/monthly-archival.md` for the orchestration. Because every dated page is created inside its Year-toggle → Month-toggle nesting on the parent body, archival is **verification**, not migration. The Notion Writer's role on archival day:
 
-1. Verify the previous-month container exists at `Parent → Year → Month` and contains all dated pages from that month.
-2. If any dated page from a prior month is found floating at the parent level OR directly under a Year page (without a Month parent) OR misfiled in the wrong Month, log it in the run-log entry but DO NOT auto-move (placement drift implies manual edits — surface for PM review).
-3. Verify Year ordering: newest Year on top, descending. Reorder via `notion-move-pages` if drifted.
-4. Verify Month ordering inside each Year: newest Month on top. Reorder if drifted.
-5. Ensure `Preferences` is still the last child of the parent.
-6. Ensure `Run Log` and `Incidents` sit immediately above `Preferences`, in that order.
+1. Verify the previous-month Month-toggle exists inside its Year-toggle on the parent body, and that all dated `child_page` blocks for that month sit inside it.
+2. If any dated `child_page` from a prior month is found at the parent body level outside any Month toggle OR inside the wrong Month toggle OR inside a legacy Year sub-page, log it in the run-log entry but DO NOT auto-move (placement drift implies manual edits — surface for PM review).
+3. Verify Year-toggle ordering on the parent body: newest Year on top, descending. Reorder via `notion-update-page` block-reorder if drifted.
+4. Verify Month-toggle ordering inside each Year-toggle: newest Month on top. Reorder if drifted.
+5. Verify dated `child_page` block ordering inside each Month-toggle: newest date on top. Reorder if drifted.
+6. Ensure `Preferences` `child_page` block is still the last block on the parent body.
+7. Ensure `Run Log` and `Incidents` `child_page` blocks sit immediately above `Preferences`, in that order, after all Year-toggle blocks.
+
+`notion-move-pages` is used only when sub-pages (Day, Run Log, Incidents, Preferences) need to be re-rooted across parent pages — which should never happen in normal operation. Toggle-block reordering uses `notion-update-page` instead.
 
 ## Flow — Preferences page updates
 
@@ -131,11 +138,12 @@ Use `notion-update-page` with `command: update_content` and targeted find-and-re
 
 ## Idempotency
 
-- Don't create a duplicate Year page. Match by exact 4-digit title under the parent.
-- Don't create a duplicate Month page. Match by exact spelled-out month name under the relevant Year page.
-- Don't create a dated page if one already exists for today (under the resolved Month). Confirm with the PM first if they're manually re-firing Mode 1.
+- Don't create a duplicate Year toggle block. Match by exact 4-digit plain-text title on the parent body.
+- Don't create a duplicate Month toggle block. Match by exact spelled-out month name inside the relevant Year toggle.
+- Don't create a dated sub-page if a `child_page` block matching today's title already exists in the resolved Month toggle. The rerun-suffix flow (Step 4) handles intentional re-fires.
 - Don't create a duplicate Preferences page. If one exists and first-run setup re-fires accidentally, route to first-run-setup.md's early-exit logic.
 - Don't duplicate Morning Queue databases within a dated page. Each dated page has exactly one.
+- Don't auto-migrate legacy Year/Month sub-pages into toggle blocks — log drift, leave alone.
 
 ## Error handling
 
@@ -144,8 +152,9 @@ Use `notion-update-page` with `command: update_content` and targeted find-and-re
 | Page creation fails | Retry once. If fails, abort Mode 1 with Slack to PM: `Couldn't write today's morning queue. [error]` |
 | Database creation fails | Retry once. If fails, abort. |
 | Row creation fails for a single item | Log in AI Notes on the summary block, continue with remaining rows |
-| `notion-move-pages` fails during archival reorder | Log and continue. Order drift can be corrected on the next fire. |
-| Year or Month container creation fails | Retry once. If still fails, abort Mode 1 with Slack to PM: `Couldn't create the Year/Month container. [error]` — do NOT fall back to creating the dated page flat under the parent. |
+| Block reorder fails during archival | Log and continue. Order drift can be corrected on the next fire. |
+| `notion-move-pages` fails during archival sub-page reorder (Run Log / Incidents / Preferences) | Log and continue. |
+| Year or Month toggle creation fails | Retry once. If still fails, abort Mode 1 with Slack to PM: `Couldn't create the Year/Month toggle block. [error]` — do NOT fall back to creating the dated page flat at the parent body level. |
 | Preferences page is missing | Route to `first-run-setup.md` |
 
 ## Performance

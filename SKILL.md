@@ -83,14 +83,15 @@ EVERY ENTRY POINT (scheduled or manual):
 Mode 1 (scheduled collection):
   → preflight
   → Read Preferences (already loaded by preflight)
+  → references/pod-matrix.md — fetch + parse Pod Matrix from POD_MATRIX_URL (cached for run; gracefully degrades to Orbit-only on absence/failure)
   → Call collectors in parallel:
     ├─ collectors/orbit.md
     ├─ collectors/gmail.md
     ├─ collectors/slack.md
     └─ collectors/fathom.md
   → synthesis/matcher.md — group signals by project
-  → synthesis/pod-inference.md — compute pod per project
-  → recommendation logic (inside matcher) — pick assignee by ROLE FIT only (no availability check)
+  → synthesis/pod-inference.md — compute pod per project (matrix members ∪ Orbit followers/recent-assignees)
+  → recommendation logic (inside matcher Job 6) — pick assignee via 4-branch tree: history wins → matrix availability → floater availability → cross-matrix Uncertain. get_user_workload fires only on no-history branches.
   → writers/notion.md — write today's dated sub-page with inline database + Ready toggle at top
     → Enforces parent-page structure per schemas/parent-page.md
     → Enforces Morning Queue schema per schemas/morning-queue-database.md
@@ -135,7 +136,7 @@ Connector failure at any step:
 | **Gmail** | PM's `@whitelabeliq.com` inbox ONLY (single account, even if other accounts are authenticated). Aliases respected. Overnight window. Filtered for client/AM/team/leadership. Skips Orbit notification emails. | `mcp__...gmail.*` |
 | **Slack** | Client/AM/project direct asks, project-specific channels, PM DMs. Intentionally minimal — not a full Slack scan. | `mcp__...slack.*` |
 | **Fathom** | Calls PM attended (and missed) in last 24h + action items + recording links | `mcp__...fathom.*` |
-| **Notion** | Read Preferences. Write dated sub-pages, inline database, row detail pages. On 1st of month: move previous month into named toggle. ONLY the Notion parent page identified in `config.md`. | `mcp__...notion.*` |
+| **Notion** | Read Preferences. Write dated sub-pages, inline database, row detail pages. On 1st of month: move previous month into named toggle. ONLY the Notion parent page identified in `config.md`. **Read-only exception:** the Pod Matrix page identified by the runtime-injected `POD_MATRIX_URL` (Mode 1 routine prompt only — see `ROUTINE-ENTRYPOINTS.md`) is allowlisted for `notion-fetch` only; never written. Mode 2 and Monthly Archival do not receive `POD_MATRIX_URL` and do not read the Pod Matrix. | `mcp__...notion.*` |
 
 Explicitly forbidden: Pipedrive, Apollo, Common Room, Hex, Calendar, Keka, Atlassian, Linear, Intercom, Figma, Klaviyo, Ahrefs, Canva, ClickUp, Monday, Fireflies, Pendo, Amplitude, Quickbooks, or any other connector. Google Drive / Docs / Sheets and SharePoint are allowed read-only on-demand only as defined in `references/external-doc-access.md` — never as primary collection sources.
 
@@ -146,7 +147,7 @@ Explicitly forbidden: Pipedrive, Apollo, Common Room, Hex, Calendar, Keka, Atlas
 3. **Plain language only for India delivery team outputs.** Slack handoffs to team members and Orbit task bodies use 4th–5th grade general English with role-specific technical terms preserved. PMs, AMs, and leadership get normal professional English. See `writers/plain-language.md`.
 4. **Source citation on everything sourced from a document.** When the skill reads a PDF, image, PPT, or doc for context, it cites the filename in the output. See `writers/source-citation.md`.
 5. **Nothing client-facing or team-facing is auto-sent.** Emails are drafts (with three documented exceptions in `executors/email.md`). Slack to team or AM is drafted into today's dated Notion page under the row's Outcome — the PM copies and sends from there. The only Slack sends Mode 2 may make are: the PM self-summary, the escalation backup ping (Step 3a), and a team handoff with explicit PM `send` note + audience = team.
-6. **Availability is not checked.** Skill recommends the most suitable person by role. PM overrides via note if unavailable.
+6. **Availability is checked only on the no-history fallback path.** When at least one role-fit candidate has prior task history on the project, familiarity wins (no availability check). When no role-fit candidate has history (brand-new project, or all role-fit pod members are new to the project), the matcher calls Orbit `get_user_workload` for the role-fit candidates from the running PM's matrix and picks the lightest-loaded. If the PM's matrix has no role-fit member, the matcher checks the Floater matrix; if Floaters also lack the role, it surfaces cross-matrix candidates as `Uncertain:`. The PM still overrides via note. See `synthesis/matcher.md` Job 6 and `synthesis/pod-inference.md` Step 5. No Keka / leave data — that connector is forbidden.
 7. **Mode 1 never asks the PM questions.** If unsure about an item, list it as its own row with an `Uncertain:` note in AI Notes. Never block waiting for input.
 8. **PM notes are interpreted as natural language.** See `synthesis/note-interpreter.md`. Short notes like `assign to Vijay`, `save as draft`, `mark as high priority` must resolve correctly.
 9. **Row-level approval is explicit per row.** No bulk-approve. No status sweep. Each row either gets flipped to `Approved`, gets a note, gets marked `Skip. No Action Needed`, or stays at `Recommended Action` (= no action).
@@ -186,13 +187,14 @@ Everything below this file provides the detailed behavior. Load the specific fil
 - `writers/notion.md` — Notion page and database creation. Enforces parent-page structure.
 - `writers/plain-language.md` — language-splitter rules.
 - `writers/source-citation.md` — citation formats.
-- `schemas/parent-page.md` — parent Notion page structure (header callout + Year > Month > Date sub-page hierarchy + Run Log + Incidents + Preferences last).
+- `schemas/parent-page.md` — parent Notion page structure: header callout + Year/Month heading-toggle blocks on parent body containing dated sub-page links + Run Log + Incidents + Preferences last. Day pages stay as sub-pages (Notion-tree parent = parent page); Year/Month are toggle blocks, not sub-pages.
 - `schemas/preferences-page.md` — Preferences layout.
 - `schemas/morning-queue-database.md` — inline database schema (9 columns, 4 Status options, 4 Source Systems options).
 - `schemas/row-detail-page.md` — row detail page layout (headings + reference toggle at bottom).
 - `schemas/orbit-dq-standard.md` — 6-section Orbit task body template.
 - `references/due-date-categories.md` — PM note → category ID mapping.
 - `references/status-values.md` — Status enum semantics.
+- `references/pod-matrix.md` — read-only Pod Matrix (Notion) parsing, name → Orbit user_id resolution, fallback when matrix unavailable.
 
 ## Build status
 

@@ -122,21 +122,66 @@ One item typically has one primary action. Secondary actions (notify AM, CC Nish
 
 ### Job 6 — Recommend the assignee
 
-Call `synthesis/pod-inference.md` with the item's project ID. It returns the candidate pool for that project with role hints and task history.
+Call `synthesis/pod-inference.md` with the item's project ID. It returns the candidate pool — matrix members ∪ Orbit followers/recent-assignees — with role hints, familiarity scores, `has_history_on_project` booleans, matrix membership flags, plus the `floater_pool` and `functional_pools` for fallback paths.
 
-From the candidates, pick the single best one by ROLE FIT ONLY. No availability check.
+Pick the single best assignee using a 4-branch decision tree. Familiarity wins by default; availability is checked only on the no-history fallback path (per `SKILL.md` non-negotiable rule #6).
 
-Role-fit heuristics:
-- If the task is FE / WordPress-themed → pick someone with FE or WordPress history on the project
-- If it's BE / API / database → pick someone with BE history
-- If it's QA → pick the QA person
-- If it's design → pick the designer
-- If it's project coordination / AM-liaison → suggest the PM themselves
-- If no clear role fit, leave `recommended_assignee = null` and flag AI Notes: `Uncertain: I can't tell who's the best person for this. Please drop a note.`
+#### Role-fit heuristics
 
-Write the assignee as `Name (Role) — short reason`. Example: `Vijay Patel (FE) — primary FE on Agency X, 24 hrs on current homepage task`.
+Filter the candidate list by role first, using the task's domain:
 
-If the PM knows better and wants to reassign outside the pod, their note will override (PM note always wins).
+- FE / HTML / front-end / homepage → role `FE` (matrix label `HTML`)
+- WordPress / WP / PHP / theme / plugin → role `WP` (matrix label `WordPress / PHP`)
+- BE / API / database / server-side → role `BE` (no matrix label — Orbit-history only)
+- QA / testing / regression → role `QA`
+- Design / mockup / Figma → role `Design`
+- Content / copy / blog → role `Content`
+- Business analysis / requirements / scoping → role `BA`
+- Project coordination / AM-liaison → suggest the PM themselves (existing behavior)
+
+Apply matrix `role_hint` first (strongest signal); fall back to Orbit `department` and task history when the candidate has `source: orbit-history` (no matrix hint).
+
+#### Decision tree
+
+1. **Branch (a) — History wins.** If at least one role-fit candidate has `has_history_on_project = true`:
+   - Pick the candidate with highest `familiarity_score`.
+   - **No `compute_availability` call.** Familiarity is the deciding signal.
+   - Reason format: `<role> on <project>, <N> tasks last 3mo<, active now if applicable>`.
+
+2. **Branch (b) — Matrix availability fallback.** Else if the PM's matrix (`source: matrix` or `source: both`) has at least one role-fit candidate (none with project history):
+   - Call `pod-inference.compute_availability` on those candidates.
+   - Pick the candidate with highest `availability_score`.
+   - Reason format: `<role> in <PM matrix>, no prior task on <project>, lightest workload (<N> open tasks)`.
+   - If all availability scores come back null (workload check failed for everyone), pick the highest `familiarity_score` and append ` — availability unknown` to the reason.
+
+3. **Branch (c) — Floater fallback.** Else if `floater_pool` has at least one role-fit candidate:
+   - Call `compute_availability` on the floater role-fit candidates.
+   - Pick the highest `availability_score`.
+   - Reason format: `Floater <role>, no <role> in <PM matrix>, lightest workload (<N> open tasks)`.
+
+4. **Branch (d) — Cross-matrix Uncertain.** Else:
+   - Set `recommended_assignee = null`.
+   - In AI Notes: `Uncertain: No <role> in <PM matrix> or Floaters. Cross-matrix candidates: <comma-separated list of names + matrix from functional_pools>. Please pick.`
+   - Example: `Uncertain: No Design in Matrix A or Floaters. Cross-matrix candidates: Jay Panchal (Design Matrix), Vijay Jadav (Design Matrix), Rinkal (Design Matrix). Please pick.`
+
+#### Matrix-unavailable degradation
+
+When `pod-inference` returns `matrix_available: false` (URL not injected, fetch failed, or parse failed), only branches (a) and a degraded (d) apply:
+
+- Branch (a) still works — Orbit history is sufficient.
+- Branches (b) and (c) cannot fire (no matrix pool to draw from). Skip them.
+- Branch (d) becomes: `recommended_assignee = null`, AI Notes `Uncertain: No prior task on <project> and Pod Matrix unavailable. Please pick the assignee.`
+
+#### Assignee write format
+
+Write the assignee as `Name (Role) — short reason`. Examples:
+
+- Branch (a): `Vijay Patel (FE) — primary FE on Agency X, 24 hrs on current homepage task`
+- Branch (b): `Atul (WP) — WordPress / PHP in Matrix A, no prior task on BrightPath, lightest workload (3 open tasks)`
+- Branch (c): `Vijay Salvi (FE) — Floater HTML, no HTML in Matrix A, lightest workload (2 open tasks)`
+- Branch (d): `null` with AI Notes Uncertain message above.
+
+If the PM knows better and wants to assign outside the pod, their note will override (PM note always wins — existing rule).
 
 ### Job 7 — Generate the proposed Orbit task body
 
@@ -180,7 +225,7 @@ Leave empty if nothing notable.
 
 ## What the matcher does NOT do
 
-- Does not check availability or capacity.
+- Does not check availability or capacity proactively. Availability is checked only on the no-history fallback path (Job 6 branches b/c) per `SKILL.md` non-negotiable rule #6.
 - Does not estimate hours.
 - Does not pick a due date — the PM decides via the Recommended Action execution or via an explicit note.
 - Does not group probable matches. Uncertain = separate items.
