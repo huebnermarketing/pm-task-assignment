@@ -163,9 +163,37 @@ If execution of a row fails mid-way (MCP unavailable, note un-interpretable, Orb
 - Write a failure note in the `Outcome` column: `FAILED — [reason]. Will retry if re-approved.`
 - Log the failure. Continue with remaining rows — don't abort the whole run for one row's failure.
 
-### Step 9 — Post-execution Slack summary to the PM
+### Step 9 — Build the end-of-day copy blocks
 
-After all rows are processed (whether success or fail), send a Slack DM to the PM summarizing:
+After the per-row loop completes (success and failure rows both processed), assemble the two end-of-day copy blocks and hand each to `writers/notion.md`. Both blocks are non-blocking — if either reports failure, surface it in the self-summary and continue.
+
+#### Step 9a — Pod Daily Task block
+
+Hand to `writers/notion.md` — Flow — appending the Pod Daily Task block.
+
+Inputs the builder collects:
+- Every row whose Outcome string records an Orbit task create or reassign (new `Task created → Orbit #...` or `Reassigned from X → Y`).
+- For each qualifying row, pull from the executor return values: `client_name`, `project_name`, `task_title`, `task_id`, `orbit_task_url`, `assignee_first_name`, `assignee_full_name`.
+- Preserve matcher order (the same order the rows appear in the Morning Queue database).
+
+Skip silently if zero rows qualify or if `pod_daily_task_enabled = false`.
+
+#### Step 9b — AM Daily Ping block
+
+Hand to `writers/notion.md` — Flow — appending the AM Daily Ping block.
+
+Inputs the builder collects:
+- The same qualifying-row set (filtered by this section's own `include_reassignments` flag).
+- Grouping: map each qualifying row to its AM via the Preferences Account Managers → Projects associations. Drop rows with no AM. Drop AMs listed in `quiet_ams`.
+- For each AM group: the AM identity fields from Preferences, plus the bundle of row contexts (summaries, recommended actions, resolved assignees) needed for the writer's drafting call.
+
+Skip silently if zero AMs qualify or if `am_ping_enabled = false`.
+
+The writer handles per-AM body drafting via `writers/plain-language.md`. Mode 2 does not draft any text itself for this block — it only assembles inputs.
+
+### Step 10 — Post-execution Slack summary to the PM
+
+After the digest block is appended (or skipped), send a Slack DM to the PM summarizing:
 
 ```
 Your morning queue executed.
@@ -185,15 +213,32 @@ Your morning queue executed.
   • BrightPath proposal — Gmail MCP timed out. Retry by typing `PM Task Assignment, run execution now` or wait for tomorrow.
 
 Open today's Notion queue page to copy the Slack drafts and send them to your team / AMs.
+
+Pod Daily Task block ready at the bottom of today's page — copy and paste into the pod's daily task channel.
+AM Ping Drafts block ready below it — copy each into a DM to the AM.
 ```
+
+Closing-line variants — append independently based on each block's outcome. If both are skipped, omit both lines.
+
+Pod Daily Task line variants:
+- Success → `Pod Daily Task block ready at the bottom of today's page — copy and paste into the pod's daily task channel.`
+- Layout parsed but has no `for_each_task:` loop → `Pod Daily Task block rendered but has no task loop — see preferences.`
+- Render failed → `Pod Daily Task block failed to render — see run-log.`
+- Zero qualifying rows OR digest disabled in preferences → omit.
+
+AM Ping Drafts line variants:
+- Success → `AM Ping Drafts block ready below it — copy each into a DM to the AM.`
+- Layout parsed but has no `for_each_am:` loop → `AM Ping Drafts block rendered but has no AM loop — see preferences.`
+- Render failed (block-level or any per-AM draft) → `AM Ping Drafts block had errors — see run-log.`
+- Zero qualifying AMs OR AM ping disabled in preferences → omit.
 
 Use `executors/slack.md` to send this DM.
 
-### Step 10 — Update Preferences
+### Step 11 — Update Preferences
 
 Set `last_execution_run` timestamp in Preferences.
 
-### Step 11 — Append run-log entry
+### Step 12 — Append run-log entry
 
 Call `writers/run-log.md` with the execution summary:
 - Timestamp range (start → end of this Mode 2 fire)
@@ -201,10 +246,12 @@ Call `writers/run-log.md` with the execution summary:
 - Aggregate counts (executed / skipped / failed / held)
 - Connector status (which MCPs were healthy, degraded, failed)
 - Whether escalation was fired (no, in this branch — Step 3 handles that case before reaching here)
+- Pod Daily Task block outcome: `appended` / `skipped_no_qualifying_rows` / `skipped_disabled` / `failed: <reason>`, plus the count of qualifying rows
+- AM Daily Ping block outcome: `appended` / `skipped_no_qualifying_ams` / `skipped_disabled` / `failed: <reason>` / `partial: <N>_drafts_failed`, plus the count of AMs in the block and the count of per-AM draft failures (if any)
 
 The writer creates a row in the Run Log database on the Notion parent and a linked decision-trace detail page. This trace is what the post-mortem and the next fire's preflight read.
 
-### Step 12 — Exit
+### Step 13 — Exit
 
 Mode 2 is complete. No further action.
 

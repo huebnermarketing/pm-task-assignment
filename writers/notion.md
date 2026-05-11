@@ -109,6 +109,211 @@ For each row Mode 2 executed:
   - The full plain-language draft body returned by `executors/slack.md`
 - No other changes to row detail page content — source-of-truth stays intact.
 
+## Flow — appending the Pod Daily Task block (end of Mode 2)
+
+After all rows are processed and the per-row `Slack draft (copy to send)` blocks are written, append a **single Pod Daily Task block** to today's dated page. The PM copies this whole block in one shot and pastes it into the pod's daily task Slack channel.
+
+**Placement:** at the very bottom of the dated page, BELOW the inline Morning Queue database. Never above it, never inside the database, never on the row detail pages.
+
+The block has two parts: a fixed **anchor** (skill-managed, supports rerun detection) and a customizable **body** (rendered from the PM's `pod_block_layout` DSL). Both are described below.
+
+### Step 1 — Read templates, switches, and layout from Preferences
+
+Pull the **Pod Daily Task Block** section from the cached Preferences page (already loaded in Mode 2 Step 1). Read every field:
+
+- `pod_daily_task_enabled` (bool) — if `false`, skip the entire flow, no run-log entry needed.
+- `pod_daily_task_slack_channel` (string, reference only — never used to send).
+- `include_reassignments` (bool).
+- `caption_template` (string).
+- `date_label_template` (string).
+- `task_heading_template` (string).
+- `task_line_template` (string).
+- `pod_block_layout` (string — the block layout DSL, stored in a Notion code block).
+
+If any template or layout field is missing or empty on the Preferences page, fall back to the documented default for that field — see `schemas/preferences-page.md` — Pod Daily Task Block. Each field is resolved independently.
+
+**Token substitution rule (applies to every rendered string).** Substitute every recognized `{token}` with its value. Leave unrecognized tokens verbatim in the output — never strip them, never error. This makes typos visible to the PM in Notion.
+
+**Template-field reference rule.** Inside the layout DSL, `{{field_name}}` (double braces) resolves to the rendered value of the named template field (its content is itself token-substituted in the current context first). Single-brace `{token}` always means a token; double-brace `{{name}}` always means a template field reference.
+
+### Step 2 — Qualify rows
+
+Include a row only if Mode 2 executed an Orbit task create or reassign for it in this run. Specifically:
+- Include rows whose Outcome string records a new Orbit task ID (`Task created → Orbit #...`).
+- Include rows whose Outcome string records an explicit reassignment (`Reassigned from X → Y`) ONLY IF `include_reassignments` is `true`.
+- Exclude rows with `Status = Skip. No Action Needed`, `Status = Recommended Action` (PM didn't approve), `HELD`, `FAILED`, status-only updates, comment-only updates, email-only drafts, and any row that didn't touch Orbit task ownership.
+- If zero rows qualify, do NOT append an empty block (anchor included). Skip silently and log `pod_digest_skipped: no_qualifying_rows` in the run-log.
+
+Preserve matcher order for the included rows.
+
+### Step 3 — Parse the layout DSL
+
+Parse `pod_block_layout` into an in-memory tree of block specs. Rules per the Preferences schema:
+
+- One block per line, format `<type>` or `<type>: <content>`.
+- Two-space indentation = nesting. Establish each block's parent by indentation level.
+- `for_each_task:` marks a sub-tree that is repeated per qualifying row.
+- `#`-prefixed lines and blank lines are ignored.
+- Validation:
+  - Unknown block type → log `pod_layout_unknown_block: <type>`, skip the line, keep parsing.
+  - Indentation under a non-nestable block (`heading_1/2/3`, `paragraph`, `quote`, `divider`) → log `pod_layout_illegal_nesting: <parent>`, render the child as a sibling at the parent's level, keep parsing.
+  - Malformed indentation (e.g., 3-space indent, or jumping levels) → log `pod_layout_parse_failed: <reason>` and fall back to the default layout for this run.
+  - No `for_each_task:` directive anywhere in the parsed tree → render the layout as-is (no task list) and log `pod_layout_no_task_loop`. The PM self-summary closing line changes to: `Pod Daily Task block rendered but has no task loop — see preferences.`
+- A successfully parsed empty layout (zero block lines after comments) → fall back to default.
+
+### Step 4 — Resolve the per-row token map
+
+For each qualifying row, capture the executor-return values: `client_name`, `project_name`, `task_title`, `task_id`, `orbit_task_url`, `assignee_first_name`, `assignee_full_name`. Build the date token map once for the run (`{date_dd}`, `{date_mm}`, `{date_yyyy}`, `{date_month_name}`, `{date_iso}`).
+
+**Available tokens by context.** Date tokens are always available. Task tokens are available ONLY inside a `for_each_task:` sub-tree. If a task token appears outside that sub-tree, leave it verbatim (so a PM mistake surfaces in Notion rather than silently rendering empty).
+
+### Step 5 — Emit blocks: anchor first, then body
+
+Emit blocks in this order. The anchor is fixed and never reads from the DSL.
+
+**Anchor (always emitted, in this order, NEVER customizable):**
+
+1. **Divider block** — separates the digest from the morning queue database above.
+2. **Heading-2 block** — plain text exactly `Pod Daily Task — copy into Slack`. This text is the rerun match key. Do not let any template or DSL override it.
+
+**Body (rendered from the parsed `pod_block_layout` tree):**
+
+Walk the parsed tree depth-first. For each block spec:
+- Resolve template-field references (`{{name}}`) by looking up the named field's current value and substituting tokens in it in the current context.
+- Resolve tokens (`{name}`) in the resulting string, then in any of the spec's other text properties.
+- When the walker enters a `for_each_task:` sub-tree, iterate over the qualifying rows in matcher order. For each row, emit a fresh copy of the sub-tree's blocks with task tokens bound to that row's values.
+- Map each block spec to its Notion block type. For toggle blocks, descend into the spec's children and emit them as Notion `children` of the toggle. For `to_do`, `bulleted_list_item`, `numbered_list_item`, and `callout`, children are also legal — emit them as Notion children. For non-nestable types, ignore any (already-warned-during-parse) children.
+
+The default layout produces, for a 3-task day on 11 May 2026:
+
+```
+─────────────────────────────────
+## Pod Daily Task — copy into Slack
+Copy everything inside the date toggle below and paste into the pod's daily task Slack channel. Each line is one task you assigned today.
+
+▼ 11/05/2026
+  ## Wick MarketingWick Marketing PHP Upgrade16315
+  ☐ https://app.whitelabeliq.com/93640173/project/45021837663/96642 - Aagna
+
+  ## Markit360 llcTru-ConnectTru-Connect AI Audit16380
+  ☐ https://app.whitelabeliq.com/93640173/project/25976347756/96632 - Hitesh
+
+  ## Nex-TechNex Tech Google Data Studio16341
+  ☐ https://app.whitelabeliq.com/93640173/project/20748967704/96442 - Manan
+```
+
+### Step 6 — Idempotency
+
+**Block-level (rerun same day).** If today's dated page already has a `Pod Daily Task — copy into Slack` Heading-2 anchor from a prior Mode 2 fire:
+- Find the anchor (the Heading-2 with that exact plain-text).
+- Treat every block between the anchor and the next anchor (or the end of the page) as the digest's body. Delete those body blocks.
+- Re-emit the body from the freshly-parsed layout. The anchor (Divider + Heading-2) stays in place — do not delete or recreate it.
+- If the layout DSL changed between runs (different block types, different nesting), the new layout fully replaces the old body. Tick-state preservation (below) is best-effort across structural changes.
+- If multiple anchors exist on the page (drift — should not happen), use the last one and log it in the run-log.
+
+**Checkbox state preservation.** Before deleting old body blocks, scan them for to-do blocks whose rendered text contains an Orbit task URL (`https://app.whitelabeliq.com/.../<task_id>` pattern). Build a `set<ticked_task_id>` of ones that were checked. After emitting the new body, walk the freshly-emitted to-do blocks and, for any whose rendered text contains a URL with a `task_id` in the ticked set, flip them to checked. URLs not in the qualifying set are dropped naturally because they don't appear in the new body. New URLs default unchecked.
+
+This preservation works only if the PM kept an Orbit URL token in their `task_line_template` (or some other template the to-do references). If the layout has no URL anywhere, tick state cannot be matched across runs and all to-dos render unchecked — log `pod_digest_tick_preservation_skipped: no_task_id_in_layout`.
+
+### Step 7 — Tooling and failure handling
+
+Use `notion-update-page` block-append for first-time creation. Use targeted child-block delete + append for body refresh on rerun. No new pages are created. Batch the body appends in one `notion-update-page` call where the block count permits.
+
+If any part of the digest append fails, log to run-log and continue. Do NOT block the PM self-summary — the digest is a copy-aid, not a blocker. The PM self-summary message appends one line on failure: `Pod Daily Task block failed to render — see run-log.`
+
+## Flow — appending the AM Daily Ping block (end of Mode 2)
+
+Runs immediately after the Pod Daily Task block flow completes. Same shape: fixed anchor + body rendered from a layout DSL (`am_block_layout`). Lives directly below the Pod Daily Task block on the dated page.
+
+**Placement:** at the bottom of the dated page, BELOW the Pod Daily Task block (or where the Pod block would have been if it was skipped). Never above the Morning Queue database, never on row detail pages.
+
+### Step 1 — Read AM ping config from Preferences
+
+Pull the **AM Daily Ping Block** section. Read every field:
+
+- `am_ping_enabled` (bool) — if `false`, skip the entire flow, no run-log entry needed.
+- `include_reassignments` (bool, scoped to this section — independent of the Pod Daily Task switch).
+- `quiet_ams` (list of AM names to skip).
+- `am_ping_caption_template` (string).
+- `am_heading_template` (string).
+- `am_ping_body_guidance` (string — free-text guidance, NOT a token-substituted template).
+- `am_block_layout` (string — layout DSL).
+
+Fall back to defaults per `schemas/preferences-page.md` for any missing or empty field. Each field resolved independently.
+
+### Step 2 — Qualify and group rows by AM
+
+Walk the same set of rows used by the Pod Daily Task qualification (Step 2 of that flow), with these differences:
+- Use this section's `include_reassignments` flag, not the Pod section's.
+- For each qualifying row, determine which AM owns it by matching the row's `Project` value against the AM-to-Projects associations in the Preferences Account Managers section. A row may map to zero AMs (no AM owns the project) or one AM. Rows that map to zero AMs are not part of any per-AM ping.
+- After grouping, drop any AM listed in `quiet_ams`.
+- After grouping, drop any AM with zero qualifying rows.
+
+If zero AMs remain after grouping, do NOT append the block (no anchor emitted). Log `am_digest_skipped: no_qualifying_ams` in the run-log.
+
+Order AMs alphabetically by `am_name` for deterministic rendering across runs.
+
+### Step 3 — Parse the AM layout DSL
+
+Same parser rules as Pod Daily Task layout. The only difference: the loop directive is `for_each_am:` instead of `for_each_task:`. A `for_each_task:` directive inside `am_block_layout` is rejected at parse time with `am_layout_unknown_directive: for_each_task` and the line is skipped.
+
+### Step 4 — Draft the per-AM body via `writers/plain-language.md`
+
+For each AM in the grouped set:
+
+1. Gather row context for the AM's qualifying rows: the row summaries, recommended actions, resolved assignees, project names, and any relevant details from the row detail pages (Sources, Proposed Orbit Task Body sections).
+2. Build the AM context object: `{am_name}`, project list, task list, assignee list.
+3. Call `writers/plain-language.md` with:
+   - The current `am_ping_body_guidance` text as the drafting instruction.
+   - The row context bundle.
+   - PM tone samples from Preferences (for voice calibration).
+4. Receive a 3-line draft body. This becomes the value of `{{am_ping_body}}` for this AM in the loop iteration.
+
+**Plain-language enforcement.** The AM ping body passes through the same 4th-5th grade English screen as team Slack drafts ONLY for AMs marked in Preferences as needing it. By default, AM pings stay in normal professional English (per `executors/slack.md` AM messages section). The drafting call should pass an `audience: am` flag so the plain-language writer skips the simplification pass.
+
+### Step 5 — Resolve the per-AM token map
+
+Build the AM token map: `{am_name}`, `{am_first_name}`, `{am_last_name}`, `{am_slack_handle}`, `{am_email}` from Preferences, `{am_tasks_count}` and `{am_projects_csv}` from the grouped row set. Add the run's date token map for blocks outside the loop.
+
+### Step 6 — Emit blocks: anchor first, then body
+
+**Anchor (always emitted when at least one AM qualifies, NEVER customizable):**
+
+1. **Divider block.**
+2. **Heading-2 block** — plain text exactly `AM Ping Drafts — copy into Slack`. This is the rerun match key.
+
+**Body** — walk the parsed `am_block_layout` tree depth-first, same rules as Pod Daily Task layout. When the walker enters a `for_each_am:` sub-tree, iterate over the grouped AMs in alphabetical order; for each, emit the sub-tree with AM tokens and `{{am_ping_body}}` bound to that AM's draft.
+
+The default layout produces, for a 2-AM day:
+
+```
+─────────────────────────────────
+## AM Ping Drafts — copy into Slack
+One short ping per AM, wrapping today's work on their projects. DM each AM at their handle below. The skill never auto-sends these — copy and send yourself.
+
+### Sarah Chen (@sarahc)
+Two tasks picked up for Agency X today — Vijay is on the homepage revisions and Rohit is owning the QA pass.
+Target: preview ready before Thursday's board review.
+Will keep you posted.
+
+### Caitlin Park (@caitlinp)
+DigitalFirst's three action items from this morning's call are now in Orbit — Ravi has the homepage tweaks and Amit owns the analytics fix.
+Ravi is targeting end of week for the first pass.
+Ping me if priorities shift.
+```
+
+### Step 7 — Idempotency
+
+**Block-level (rerun same day).** Same pattern as Pod Daily Task. Match by the anchor's exact Heading-2 plain-text `AM Ping Drafts — copy into Slack`. Find the anchor, delete every block between it and the next anchor (or end of page), re-emit the body from the freshly-parsed layout. Anchor stays in place.
+
+**Body regeneration on rerun.** The 3-line ping body is re-drafted on every Mode 2 fire because the underlying rows may have changed. No tick-state to preserve here (AM pings are paragraphs, not to-dos).
+
+**If the rerun produces a different AM set** (e.g., a quiet AM was just added, or new rows surfaced new AMs), the body fully reflects the new set. Removed AMs are dropped.
+
+### Step 8 — Tooling and failure handling
+
+Same as Pod Daily Task. If any per-AM `writers/plain-language.md` call fails (timeout, MCP error), emit a placeholder paragraph for that AM: `Couldn't draft ping for {am_name} on this run — try rerunning Mode 2 or write manually.` Continue with the remaining AMs. Log each failure per AM. The PM self-summary appends one line on failure: `AM Ping Drafts block had errors — see run-log.`
+
 ## Flow — monthly archival (1st of month)
 
 See `modes/monthly-archival.md` for the orchestration. Because every dated page is created inside its Year-toggle → Month-toggle nesting on the parent body, archival is **verification**, not migration. The Notion Writer's role on archival day:
@@ -144,6 +349,8 @@ Use `notion-update-page` with `command: update_content` and targeted find-and-re
 - Don't create a duplicate Preferences page. If one exists and first-run setup re-fires accidentally, route to first-run-setup.md's early-exit logic.
 - Don't duplicate Morning Queue databases within a dated page. Each dated page has exactly one.
 - Don't auto-migrate legacy Year/Month sub-pages into toggle blocks — log drift, leave alone.
+- Don't append a second Pod Daily Task block on the same dated page. Replace the existing toggle's children instead.
+- Don't append a second AM Daily Ping block on the same dated page. Find the anchor and replace the body blocks below it.
 
 ## Error handling
 
@@ -155,6 +362,9 @@ Use `notion-update-page` with `command: update_content` and targeted find-and-re
 | Block reorder fails during archival | Log and continue. Order drift can be corrected on the next fire. |
 | `notion-move-pages` fails during archival sub-page reorder (Run Log / Incidents / Preferences) | Log and continue. |
 | Year or Month toggle creation fails | Retry once. If still fails, abort Mode 1 with Slack to PM: `Couldn't create the Year/Month toggle block. [error]` — do NOT fall back to creating the dated page flat at the parent body level. |
+| Pod Daily Task block append fails | Log to run-log. Continue. Append `Pod Daily Task block failed to render — see run-log.` to the PM self-summary. Do not abort Mode 2. |
+| AM Daily Ping block append fails | Log to run-log. Continue. Append `AM Ping Drafts block failed to render — see run-log.` to the PM self-summary. Do not abort Mode 2. |
+| Per-AM draft generation fails | Render a placeholder paragraph for that AM (`Couldn't draft ping for {am_name} on this run — try rerunning Mode 2 or write manually.`). Continue with remaining AMs. |
 | Preferences page is missing | Route to `first-run-setup.md` |
 
 ## Performance

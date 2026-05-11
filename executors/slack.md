@@ -148,6 +148,18 @@ Return to Mode 2 with the outcome string for the row:
 - `Slack draft appended to Notion page (audience: team — copy from today's queue page to send)`
 - `Slack draft appended to Notion page (audience: AM — copy from today's queue page to send)`
 
+## Pod Daily Task block (end-of-Mode-2 digest)
+
+Separate from the per-row drafts above. After all rows are processed, Mode 2 Step 9a builds a single **Pod Daily Task** copy-block at the bottom of the dated page — a concatenated list of every task created or reassigned that day, formatted to be pasted directly into the pod's daily task Slack channel. This is **not** a Slack-API send; the executor does not touch Slack for the digest. The build itself is handed to `writers/notion.md` — Flow — appending the Pod Daily Task block. Configuration lives in `schemas/preferences-page.md` — Pod Daily Task Block.
+
+## AM Daily Ping block (end-of-Mode-2 digest)
+
+A second end-of-Mode-2 copy-block sits directly below the Pod Daily Task block on the dated page. Mode 2 Step 9b builds **one 3-line ping per AM**, grouped by which projects each AM owns. This block is **never** Slack-API-sent — every line is a draft for the PM to copy into a Slack DM to that AM themselves.
+
+This complements (does not replace) the per-row AM drafts described above. Per-row drafts capture row-specific context under each row's Outcome on the dated page; the AM Daily Ping block is a single consolidated message per AM, ready to paste as a DM.
+
+The per-AM 3-line body is drafted by `writers/plain-language.md` (called from `writers/notion.md` during the AM block build), not by this executor. This executor only documents the block's existence and the fact that no Slack API call ever fires for it. Configuration: `schemas/preferences-page.md` — AM Daily Ping Block. Build flow: `writers/notion.md` — Flow — appending the AM Daily Ping block.
+
 ## Error handling
 
 | Failure | Behavior |
