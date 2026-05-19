@@ -160,6 +160,10 @@ Explicitly forbidden: Pipedrive, Apollo, Common Room, Hex, Calendar, Keka, Atlas
 16. **Every routine fire writes a run-log entry** to the Run Log database on the Notion parent. Brief reason traces (one line per decision: subject → action → reason). See `writers/run-log.md` and `schemas/run-log-database.md`.
 17. **All MCP calls retry with backoff before failing.** Every MCP tool call (any of the 5 allowlisted MCPs) wraps in the retry policy defined in `connector-failure-notify.md`: 4 attempts total (1 + 3 retries), 2s/5s/15s incremental backoff, retry only on transient errors (timeout, 5xx, 429, connection reset). Permanent errors (4xx auth, 404, validation) skip retry. After exhaustion, the failure chain fires. The run-log records all retry attempts.
 
+18. **The Morning Queue drives exactly two AI actions: `Reassign` (Ad-hoc / Maintenance only) or `Create subtask` (every other project type, under a parent task currently assigned to the running PM).** Every other class of signal is filtered, not queued. FYI rows, PM coordination rows, AM/client email drafts, status-review rows, hours-overrun alerts, PM-self-task reminders, and rollup digests are **never** valid queue rows — they are recorded in the Run Log's `Filtered signals` toggle and never become rows. See `synthesis/matcher.md` Output gating + Job 11.
+
+19. **An empty Morning Queue is a correct, expected outcome.** Many mornings produce zero rows because all overnight signals reduced to PM-personal work, AM-led threads, or status reviews. The matcher MUST NOT invent rows to fill the queue. The summary line `0 items for your morning. 0 reassignments, 0 new sub-tasks. <N signals filtered — see Run Log if you want to audit>.` is a valid, healthy run. Do not lower the action bar to produce a non-zero count.
+
 ## File map
 
 Everything below this file provides the detailed behavior. Load the specific file when that behavior is needed.

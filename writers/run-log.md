@@ -27,6 +27,7 @@ run_summary = {
   skipped:            [ { source, subject, reason }, ... ],
   uncertain:          [ { item, subject, candidates, reason }, ... ],
   connector_failures: [ { connector, step, error, tier }, ... ],
+  filtered_signals:   [ { source, summary, filter_reason, citations }, ... ],  // Mode 1 only — from matcher Job 11
   execution_outcomes: [ { row, task, outcome, pm_note_interp }, ... ],  // Mode 2 only
   links: {
     queue_page_url:   string | null,        // Mode 1 / Mode 2
@@ -65,8 +66,9 @@ Render the page body per `schemas/run-log-detail-page.md`. Sections in order:
 4. `Skipped` — one bullet per `skipped[i]` (omit if empty).
 5. `Uncertain` — one bullet per `uncertain[i]` (omit if empty).
 6. `Connector failures` — one bullet per `connector_failures[i]` (omit if empty).
-7. `Execution outcomes` — Mode 2 only; one bullet per `execution_outcomes[i]`.
-8. Footer — `Run Log database` link + queue-page-or-archived-toggle link.
+7. `Filtered signals (N)` — Mode 1 only. Notion toggle block, **closed by default**. Inside: one bullet per `filtered_signals[i]`, formatted `<source> · <summary> · <filter_reason> · <citations>`. Omit the toggle entirely if `filtered_signals == []`. This is where the PM audits what the matcher dropped under the 2-action output-gating rule (`synthesis/matcher.md` Output gating + Job 11).
+8. `Execution outcomes` — Mode 2 only; one bullet per `execution_outcomes[i]`.
+9. Footer — `Run Log database` link + queue-page-or-archived-toggle link.
 
 Apply the **brevity rules** (next section) to every reason field before rendering.
 

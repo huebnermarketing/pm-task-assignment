@@ -8,6 +8,23 @@
 
 Pull overnight signals from Orbit that are relevant to the PM's projects. Return a structured list of signals ready for `synthesis/matcher.md`.
 
+## MANDATORY tool call sequence — no shortcuts
+
+This block overrides any inferred "fast path" the runtime might take. Mode 1 MUST invoke the following Orbit MCP tools in this exact order on every run. Skipping any of them is a Mode 1 failure and the assertion in `modes/mode-1-morning-collection.md` will abort the run.
+
+1. `get_user_details` — PM identity + assigned projects list.
+2. `list_projects` filtered by `project_owner_id` — owned-project enrichment.
+3. **`get_activity_log` with `from_date = last_run_timestamp`** — the **non-skippable** comment + change-history pull. Every comment, status flip, new task, new assignment landing inside the lookback window arrives ONLY via this call. `get_user_workload` does NOT return comments and is not a substitute. Run this call on every project in the universe; do not pre-filter.
+4. `list_task_comments` — fallback for any task flagged by activity log that needs comment-body detail (activity log entries may include comment IDs but not full text).
+5. `get_project_task_list` — for overdue / unassigned / new-task filters per the steps below.
+6. `get_task_details` — for context on flagged tasks.
+7. `get_asset_attachment_summary_with_download_url` — for new attachments.
+8. `list_clients` / `list_sub_clients` / `list_users` — relationship-map enrichment.
+
+`get_user_workload` is **lazy-only** — invoked by `synthesis/pod-inference.md` on the no-history fallback path, never as a substitute for steps 3–6. A Mode 1 run whose Orbit tool trace is `[get_user_workload × N]` and nothing else is a SPEC VIOLATION.
+
+If `get_activity_log` returns an MCP error, apply the retry policy from `connector-failure-notify.md` (4 attempts, 2s/5s/15s backoff). After 4 failures, log `orbit_activity_log_unavailable` in the Run Log and continue — but the Mode 1 assertion will surface the gap to the PM in the page summary.
+
 ## Scope
 
 Signals scoped to the PM's projects. "PM's projects" means:

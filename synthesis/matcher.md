@@ -22,6 +22,35 @@ This applies across all sender classification, all routing decisions, and all as
 
 If a signal involves an email address that doesn't match the canonical OR any alias of any known WLIQ identity, the sender is classified as `unknown` and the matcher proceeds with reduced confidence (often flagging `Uncertain:` in AI Notes).
 
+## Output gating — two actionable paths only
+
+The Morning Queue exists to drive **two AI actions and only two**:
+
+1. **Reassign existing Orbit task to a developer** — applies to projects whose Orbit `project_type` is in the **reassign bucket**: `Ad-hoc`, `Maintenance` ONLY. Existing task already sits with a dev; signal indicates current owner needs to change.
+2. **Create sub-task under the PM's own parent task on that project** — applies to ALL other project types (`Fixed Cost`, `SaaS`, `PPC`, `Hosting`, `Hourly`, `Repeat`, plus any new project type Orbit may add). Parent task **must be currently assigned to the running PM** (`assignee_id == PM_user_id`). Sub-task gets the full 6-section `schemas/orbit-dq-standard.md` body.
+
+The "PM's own task on that project overnight" semantic is the load-bearing constraint for path 2: the PM holds a parent task for each active engagement (e.g., the engagement's umbrella "Discovery", "Reference", or named meeting/milestone task). Sub-tasks for that engagement land under the PM's parent so the PM remains the project's coordination anchor in Orbit. If no PM-owned task exists on a project that needs new work, the matcher cannot create the sub-task — see Job 5 "Picking the parent task" for the fallback.
+
+Every signal that cannot reduce to one of these two actions is **dropped from the queue**. The PM scans Orbit directly for status reviews, FYI items, and AM coordination. Dropped signals are not lost — they are recorded in the Run Log detail page under a `Filtered signals` section so the PM can audit what was suppressed and why (see Job 11).
+
+### Drop list (explicit — do NOT emit a queue row for any of these)
+
+- Pure FYI rows (no action the PM personally must take inside Orbit on the assignee axis).
+- "PM coordination" or "PM-managed wait state" rows (`recommended_assignee = —`).
+- Rows where the next move belongs to an AM or the client (chase email, AM Slack ping, status nudge).
+- Rollup rows aggregating multiple stale tasks for PM review.
+- Status updates the PM would do themselves on Orbit (move-to-In-Review, due-date bump, close).
+- Comment-only follow-ups the PM would post themselves.
+- Email drafts to clients / AMs (PM writes those manually in Gmail).
+- Hours-overrun alerts (`no-reply@whitelabeliq.com` notifications). Already handled by Orbit hours flow per PM feedback.
+- Standup / Daily Status recap rows where no Orbit assignment changes.
+
+If the matcher finds itself drafting a row that doesn't end in either `Reassign task #X to <name>` or `Create subtask under #X with brief`, the row is filtered and logged.
+
+### Project-type lookup
+
+`project_type` comes from the Orbit project metadata returned by `get_project_details` (already in the collector's relationship map). When `project_type` is missing or unresolved, log `project_type_unknown` in the row's filter trace and DROP the row (do not guess). The PM sees the dropped signal in the Run Log; the next morning's run will retry once project metadata is populated.
+
 ## What the matcher produces
 
 A list of items. Each item becomes one row in the Morning Queue database. For each item, the matcher sets:
@@ -84,41 +113,75 @@ For each item where the matcher has any uncertainty, add a line to AI Notes that
 
 The PM resolves uncertainty by reviewing and either splitting further, writing a PM Note, or leaving it at Recommended Action.
 
-### Job 4 — Generate the one-line summary
+### Job 4 — Generate the one-line summary (verb-first, locked vocabulary)
 
-Normal professional English. This is what the PM reads when scanning the queue.
+Normal professional English. This is what the PM reads when scanning the queue. The summary is **action-led** — the first token is a locked verb, the rest is the smallest context clause needed to identify the work.
 
-Pattern: `[Client or project] — [what happened / what's needed]. [Optional second clause with context].`
+#### Locked verb list (exactly 2 verbs — no others permitted)
+
+| Verb | Used when |
+|---|---|
+| `Reassign` | Project type = Ad-hoc OR Maintenance. Existing dev-owned Orbit task is changing hands. |
+| `Create subtask` | Project type = everything else (Fixed Cost / SaaS / PPC / Hosting / Hourly / Repeat / any other). Net-new scoped work landing under the PM's own parent task on the project. |
+
+These are the ONLY two starting verbs a queue row's Summary may use. If the matcher cannot frame the row with one of these two, the row was misclassified — re-run the Output gating filter and drop it.
+
+#### Summary patterns
+
+Pattern A — Reassign:
+```
+Reassign <project short name> #<task_id> — <one-clause why>. To <role>.
+```
+
+Pattern B — Create subtask:
+```
+Create subtask under <project short name> #<parent_task_id> — <one-clause what>. To <role>.
+```
 
 Examples:
-- `Agency X — homepage revision feedback from Jane, 12 revisions, client presenting to board next Thursday.`
-- `DigitalFirst — 3 action items from yesterday's Q3 call need Orbit tasks.`
-- `Priya Sharma is out sick today; 3 tasks due this week need reassignment.`
-- `CloudBase — Ravi finished the API integration. Ready for QA.`
-- `BrightPath — revised proposal due Friday, client flagged they need numbers before committing.`
+- `Reassign Brother Plesk #109958 — patch ETA needs WP Maintenance ownership. To WP dev.`
+- `Reassign Process Barron Hours #15949 — backend overrun handoff. To BE dev.`
+- `Create subtask under Solstice WP #8393 — swap Contact Form brochure PDF. To WP dev.`
+- `Create subtask under BoyarMiller Practice Area #103623 — draft Real Estate page outline. To Content.`
 
 Rules:
-- Professional English for the PM. No plain-English simplification here (the PM is an adult US-trained English speaker).
-- Plain-language simplification kicks in later, only for delivery-team-facing outputs per `writers/plain-language.md`.
-- Keep to one line when possible; max two.
-- No emojis in the summary (keeps the queue scannable).
-- Include the client or project name at the start for at-a-glance grouping.
+- First token is one of the two locked verbs. No other openers.
+- Project short name = client-readable phrase, max 4 words. Strip the long Orbit project title.
+- Task ID always present (the row is anchored to a specific Orbit task).
+- Why / what clause = 6–10 words, identifying the work, not narrating context.
+- Role at the end = the role-hint label the matcher resolved in Job 6.
+- No emojis. No leading client name without verb. No narrative.
+- Max 120 chars total (Notion title field stays scannable across the column).
 
-### Job 5 — Recommend the action
+### Job 5 — Recommend the action (2 actions only)
 
-For each item, pick the most likely action from the PM Action set:
+The action set is closed and matches the Output gating section above. Pick exactly one:
 
-- **Create Task** — new work from an email, Slack, or Fathom action item that doesn't exist in Orbit yet.
-- **Reassign** — existing task needs to be moved to a different assignee.
-- **Create Project + Task** — new project from an agency/AM intake, then first task.
-- **Status Update** — task is stuck, needs status change (e.g., move to In Review).
-- **Draft Email** — response to a client/AM needed, best composed in Gmail first.
-- **Slack Handoff** — team member needs context for work already in Orbit.
-- **Add Orbit Comment** — record decision or progress note without creating new work.
-- **Approve + Notify** — approve something (asset, scope, direction) and notify downstream.
-- **Defer or Flag** — nothing clearly actionable; PM decides next step.
+- **Reassign** — existing Orbit task moves from current assignee to a new one. Reassign bucket only (`project_type` ∈ {`Ad-hoc`, `Maintenance`}). Output: target `task_id` (existing) + new `assignee_id`. No new task is created. No 6-section body needed (a short Orbit comment captures the reason, drafted in Job 7).
+- **Create subtask with brief** — new sub-task is created in Orbit under the **PM-owned parent task** on the project. Applies to every project type NOT in the reassign bucket. Output: `parent_task_id` (which must be a task with `assignee_id == PM_user_id`), new sub-task title, full 6-section body per `schemas/orbit-dq-standard.md` written in plain language, `assignee_id` for the sub-task.
 
-One item typically has one primary action. Secondary actions (notify AM, CC Nishant, etc.) go in the recommended_action phrase as "+ Slack Caitlin" or similar.
+If neither action fits, the signal does not become a row. Apply the Output gating filter and route to the `Filtered signals` log (Job 11).
+
+#### Picking the existing task to reassign (Reassign path only)
+
+For ad-hoc / maintenance / hosting / hourly / repeat projects, the matcher must select WHICH existing Orbit task the signal targets. Procedure:
+
+1. Pull all open tasks on the project from the relationship map.
+2. Score each task by signal-to-task match: subject keyword overlap with task title, file/feature reference, mentioned task ID in the signal body.
+3. If exactly one task scores meaningfully higher than the rest, pick it. Row Summary cites that task ID.
+4. If two or more tasks tie on score, set `recommended_assignee = null` and write AI Notes: `Uncertain: signal could apply to task #X (<title>) or task #Y (<title>). Please pick which to reassign.` Row is still emitted (one of the two valid actions) but assignee axis flagged.
+5. If no open task on the project meaningfully matches the signal, DROP the row (this is not net-new for an ad-hoc project — most likely the signal is operational chatter the dev already sees in Orbit). Log to Filtered signals.
+
+#### Picking the parent task for sub-task creation (Create subtask path only)
+
+The parent **must be a task currently assigned to the running PM** on the project. Procedure:
+
+1. From the relationship map, list every open task on the project where `assignee_id == PM_user_id`. Call this the PM-owned parent pool for the project.
+2. **If the PM-owned parent pool is empty** — the sub-task cannot be created under this rule. Drop the row and log to `Filtered signals` with `filter_reason: no_pm_owned_parent_task`. The PM sees the dropped signal in the Run Log and can seed a parent task themselves (the next morning's run will then surface it).
+3. **If the PM-owned parent pool has exactly one task** — that's the parent. Use it.
+4. **If the PM-owned parent pool has multiple tasks** — match the signal to a parent by phase / feature / deliverable keyword overlap with each parent's title. Recency breaks ties (most recently updated parent wins). If two parents tie cleanly on score, set `parent_task_id = null` and write AI Notes: `Uncertain: sub-task could go under PM-owned parent #X (<title>) or #Y (<title>). Please pick.` Row is still emitted; parent axis flagged.
+
+Sub-task `assignee_id` (different from `parent_task_id`) is picked via the Job 6 decision tree on the developer pool — same rules as before. The PM owns the parent; the dev owns the child.
 
 ### Job 6 — Recommend the assignee
 
@@ -183,34 +246,38 @@ Write the assignee as `Name (Role) — short reason`. Examples:
 
 If the PM knows better and wants to assign outside the pod, their note will override (PM note always wins — existing rule).
 
-### Job 7 — Generate the proposed Orbit task body
+### Job 7 — Generate the proposed Orbit body (action-specific)
 
-For items that will result in a new Orbit task, pre-write the 6-section task body per `schemas/orbit-dq-standard.md`.
+The body content depends on which of the two paths the row took:
 
-Write this version in plain language (4th–5th grade English) per `writers/plain-language.md` — because the assignee (delivery team) will read it.
+**Create subtask path (project bucket)** — pre-write the full 6-section task body per `schemas/orbit-dq-standard.md`. Plain language (4th–5th grade English) per `writers/plain-language.md` since the delivery team reads it. Keep role-specific technical terms. Strip corporate English. This is what lands in Orbit as the sub-task description when Mode 2 fires.
 
-Keep role-specific technical terms. Strip corporate English.
+**Reassign path (ad-hoc bucket)** — pre-write a short **Orbit reassignment comment** (NOT a full 6-section body). The comment goes on the existing task at reassignment time and tells the new assignee what changed. Format:
+
+```
+Reassigning to <new assignee first name>. Reason: <one-clause why the handover>. <Optional single sentence of context the assignee won't already see on the task>. Please continue from where the previous assignee left off and log your hours.
+```
+
+Plain language. Max 3 sentences. Cite a source link only when the context line references something the assignee can't see in Orbit (e.g., a Fathom moment or a client email thread).
+
+A reassignment row does NOT carry a `proposed_orbit_body` field. It carries a `proposed_orbit_reassign_comment` field instead. Mode 2 executor reads whichever field is present based on the row's action.
 
 ### Job 8 — Generate the proposed Slack handoff
 
-For items that will result in a Slack message to a team member, pre-write the handoff in plain language.
+The Slack handoff message is the team-Slack DM the PM copies-and-sends after Mode 2 fires (per `executors/slack.md`). Generate it for BOTH paths:
 
-Include:
-- Clear first-line summary of what needs doing
-- Why it matters (1 sentence)
-- Where to start (file, Orbit task link, etc.)
-- Any specific prep (watch Fathom recording, read attached PDF)
-- Reminder to log hours (if Preferences has that always-include rule)
+- **Reassign path** — tell the new assignee what's moving to them, why, and the task URL.
+- **Create subtask path** — tell the assignee a new sub-task landed, why, the parent context, and the task URL.
+
+Plain language per `writers/plain-language.md`. Reminder to log hours if Preferences has that always-include rule.
+
+NO Slack handoff is generated for AMs or clients — those are PM-handled outside the queue per the Output gating filter.
 
 ### Job 9 — Generate the proposed email
 
-Only when the action involves emailing a client or AM. Use normal professional English (the recipient is US-based; plain-English rule does not apply).
+**Skipped.** Email drafting is outside the queue's scope under the 2-action gating rule. Client and AM emails are PM-handled in Gmail directly. No row produces an email artifact.
 
-Draft includes:
-- Appropriate subject line
-- Greeting
-- Context + specific ask or info
-- Closing + signature from Preferences
+If a signal's primary value was an email reply, the matcher Filtered-signals-logs it and moves on.
 
 ### Job 10 — Write AI Notes
 
@@ -222,6 +289,23 @@ Include only things worth the PM knowing:
 - When a collector failed and this item has partial context
 
 Leave empty if nothing notable.
+
+### Job 11 — Emit the Filtered signals trace
+
+For every signal (or grouped signal-set) the Output gating filter dropped, append an entry to a `filtered_signals` array on the matcher's return payload. Each entry:
+
+```
+{
+  "source": <orbit | gmail | slack | fathom>,
+  "summary": <one-line description of what was dropped>,
+  "filter_reason": <one of: pm_coordination | wait_state | rollup | status_update_self_drive | comment_only_self_drive | client_email_pm_owns | am_ping_pm_owns | hours_overrun_alert | standup_recap | project_type_unknown | no_matching_open_task | no_pm_owned_parent_task>,
+  "citations": [<source links — gmail thread URL, orbit task URL, fathom recording URL>]
+}
+```
+
+`writers/run-log.md` consumes this array and writes a `Filtered signals (N)` collapsible section in the Run Log detail page. Standard Notion toggle, closed by default. The PM opens it only when they want to audit what was suppressed.
+
+This is the safety valve: the queue stays tight, but nothing the collector saw is silently lost.
 
 ## What the matcher does NOT do
 

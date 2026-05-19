@@ -60,13 +60,24 @@ Connectors available in this routine (all 5, closed allowlist): Orbit, Gmail, Sl
 
 Notion read-only exception: Notion access is normally restricted to NOTION_PARENT_PAGE_URL (read + write). For this Mode 1 routine ONLY, you may also notion-fetch POD_MATRIX_URL (read-only). Do NOT write to it. Do NOT enumerate or search around it.
 
+Mental model for this run — read before doing anything else:
+
+The Morning Queue is **NOT a daily digest**. It is the input to two specific AI actions and only two:
+(1) Reassign an existing dev-owned Orbit task to a different developer — applies to projects whose `project_type` is `Ad-hoc` or `Maintenance` ONLY.
+(2) Create a new sub-task with the 6-section brief under a parent task currently assigned to the running PM — applies to every other project type.
+
+Everything else the overnight signals contain — FYI items, PM coordination, AM/client email drafts, status-review batches, hours-overrun alerts, the PM's own tasks due today, rollup digests, standup recaps — is **NOT a queue row**. Those signals are recorded in the Run Log's `Filtered signals` toggle and never become rows. The matcher MUST NOT invent FYI / PM-action rows to fill space. An empty queue is a correct outcome and a valid run; the summary line "0 items for your morning. 0 reassignments, 0 new sub-tasks. <N signals filtered — see Run Log if you want to audit>." is healthy output. Do NOT lower the action bar to produce a non-zero row count. Per SKILL.md non-negotiable rules #18–#19 and `synthesis/matcher.md` Output gating + Job 11.
+
+Mandatory Orbit collector tool sequence per `collectors/orbit.md`: `get_activity_log` and `list_task_comments` are non-skippable on every run. `get_user_workload` is NOT a substitute and is reserved for `synthesis/pod-inference.md`'s no-history fallback path only. The Mode 1 Step 3.5 assertion will abort the run if `get_activity_log` was not invoked.
+
 Execute Mode 1 end-to-end:
 - Run preflight Steps 1–6 against the Notion parent and Preferences page (all in IST).
 - Fetch and parse POD_MATRIX_URL once at the start of the run via references/pod-matrix.md; cache the parsed pools (PM matrix, floaters, functional matrices) for the whole run. On fetch or parse failure, log a warning to the Run Log detail page and continue with Orbit-only pod inference (graceful degradation per references/pod-matrix.md).
-- Collect overnight signals from all 5 source connectors per Preferences. Window boundary in IST.
-- Synthesize, group by project, recommend assignees per synthesis/matcher.md Job 6: history wins → matrix availability → floater availability → cross-matrix Uncertain. Availability (get_user_workload) fires only on the no-history fallback path.
-- Write today's dated queue page on the Notion parent per writers/notion.md, placed at Parent → <Year> → <Month> → <DD Month YYYY> per schemas/parent-page.md (the writer creates the Year and Month container sub-pages on demand if missing).
-- Append a Run Log row + linked detail page via writers/run-log.md.
+- Collect overnight signals from all 5 source connectors per Preferences. Window boundary in IST. Orbit collector MUST invoke `get_activity_log` and `list_task_comments` per the mandatory sequence above.
+- Run Mode 1 Step 3.5 assertion before synthesis. Abort if `get_activity_log` call count is zero.
+- Synthesize per synthesis/matcher.md: apply the Output gating filter first (drop every signal that does not reduce to Reassign or Create subtask), then run Jobs 1–11 on what remains. Recommend assignees per Job 6 (history wins → matrix availability → floater availability → cross-matrix Uncertain). Availability (get_user_workload) fires only on the no-history fallback path.
+- Write today's dated queue page on the Notion parent per writers/notion.md, placed at Parent → <Year> → <Month> → <DD Month YYYY> per schemas/parent-page.md (the writer creates the Year and Month container sub-pages on demand if missing). The writer applies a Step 5.5 defense-in-depth check that re-runs the Output gating filter and pushes any drift rows to filtered_signals.
+- Append a Run Log row + linked detail page via writers/run-log.md, including the `Filtered signals (N)` toggle when the matcher emitted any filtered entries.
 
 Apply the retry policy in connector-failure-notify.md to every MCP call: 4 attempts total (1 + 3 retries) with 2s/5s/15s incremental backoff. Retry only on transient errors (timeout, 5xx, 429, connection reset). Permanent errors (4xx auth, 404, validation) skip retry and fall through to the failure chain. Log every retry attempt to the Run Log detail page.
 

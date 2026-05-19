@@ -73,9 +73,19 @@ Content order:
    - Schema per `schemas/morning-queue-database.md` — 6 main columns visible: Summary, Status, Recommended Action, Recommended Assignee, PM Notes, Outcome.
    - Additional properties (Project, Source Systems, AI Notes) exist in the schema but are hidden from the default view (they appear only when a row is opened).
 
+### Step 5.5 — Enforce output gating (defense in depth)
+
+Before iterating over the matcher's output array, scan it once and verify every item conforms to the 2-action rule from `synthesis/matcher.md` Output gating:
+
+- Every item's `recommended_action` must start with `Reassign task #` or `Create subtask under #`.
+- Every item must carry either `proposed_orbit_reassign_comment` (Reassign path) or `proposed_orbit_body` (Create subtask path), never both, never neither.
+- Items with `recommended_assignee = —` AND no `Uncertain:` AI Note are malformed — these are the legacy "PM coordination" rows that should have been filtered upstream.
+
+Any item failing these checks is moved from the items array to the `filtered_signals` array with `filter_reason: writer_gating_caught_drift` before row creation. Log to Run Log. This is a safety net; the matcher should have already prevented these — but if it didn't, the writer catches the drift rather than polluting the queue.
+
 ### Step 6 — Populate each row
 
-For each item in the matcher's output array:
+For each item in the matcher's output array (after Step 5.5 gating):
 
 1. Create a row in the database with:
    - `Summary` (title)

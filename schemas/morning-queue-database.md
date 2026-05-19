@@ -27,9 +27,9 @@ The database has **9 columns total**. The first 6 are visible in the default vie
 | Visible in default view | YES (column 1 — leftmost) |
 | Set by | Mode 1 (the matcher), via `synthesis/matcher.md` |
 | Editable by PM | Yes, but rare — the matcher writes a good summary, PM usually doesn't change it |
-| Default value | A one-line plain-language sentence written in normal professional English (NOT plain-English-rewritten — this is for the PM to read) |
-| Maximum length | Notion title cap (typically \~2000 chars). Aim for under 200 chars for scannability. |
-| Sample values | `Agency X — Jane sent homepage revision feedback overnight. 12 revisions. Client presenting to board next Thursday.` <br> `BrightPath — revised proposal with updated pricing due Friday.` <br> `Priya Sharma is out today; 3 tasks due this week need reassignment.` |
+| Default value | A one-line verb-first action sentence per `synthesis/matcher.md` Job 4. Starts with one of TWO locked verbs: `Reassign` or `Create subtask`. No other openers permitted. |
+| Maximum length | Capped at 120 chars (the matcher enforces this — see Job 4 rules). |
+| Sample values | `Reassign Brother Plesk #109958 — patch ETA needs WP Maintenance ownership. To WP dev.` <br> `Create subtask under Solstice WP #8393 — swap Contact Form brochure PDF. To WP dev.` <br> `Create subtask under BoyarMiller Practice Area #103623 — draft Real Estate page outline. To Content.` |
 
 ### Column 2 — `Status`
 
@@ -70,9 +70,9 @@ Recommended Action ─► Approved (by PM)         ─► Done (by Mode 2)
 | Visible in default view | YES (column 3) |
 | Set by | Mode 1 (the matcher) |
 | Editable by PM | Yes, but rare — PM usually drops a note in `PM Notes` instead of editing this column |
-| Default value | A short phrase describing what the skill plans to do |
+| Default value | A short phrase describing one of the two locked actions (Reassign / Create subtask) plus the team handoff. Per `synthesis/matcher.md` Job 5 the action set is closed to these two. |
 | Maximum length | Recommend under 100 chars for scannability |
-| Sample values | `Create Orbit task + Slack Vijay + Slack Caitlin (AM)` <br> `Reassign 3 tasks + Slack pod lead` <br> `Move task to In Review + Slack Mannan + email Anna` |
+| Sample values | `Reassign task #109958 to Atul (WP) + Slack handoff` <br> `Create subtask under #8393 with brief, assign to Atul (WP) + Slack handoff` <br> `Reassign task #15949 to Hitesh (BE) + Slack handoff` |
 
 ### Column 4 — `Recommended Assignee`
 
@@ -239,47 +239,47 @@ When the schema needs to evolve (e.g., adding a column in a future version), use
 
 ---
 
-## Sample row — fully populated (for reference)
+## Sample row — Create subtask under PM's parent task (project bucket)
 
 | Column | Value |
 |---|---|
-| Summary | `Agency X — Jane sent homepage revision feedback overnight. 12 revisions. Client presenting to board next Thursday.` |
+| Summary | `Create subtask under Solstice WP #106447 — swap Contact Form brochure PDF. To WP dev.` |
 | Status | `Approved` |
-| Recommended Action | `Create Orbit task + Slack Vijay + Slack Caitlin (AM)` |
-| Recommended Assignee | `Vijay Patel (FE) — primary FE on Agency X, 24 hrs on current homepage task, 12 hrs free this week` |
+| Recommended Action | `Create subtask under PM-owned parent #106447 with brief, assign to Atul (WP) + Slack handoff` |
+| Recommended Assignee | `Atul Mehra (WP) — WordPress in Matrix A, prior task on Solstice (3 last 3mo)` |
 | PM Notes | *(empty — PM accepted the recommendation)* |
-| Outcome | `Task created → Orbit #105892. Slack sent to Vijay. Caitlin emailed.` |
-| Project | `Agency X — Homepage Redesign` |
-| Source Systems | `Gmail, Slack` |
-| AI Notes | *(empty — nothing notable)* |
+| Outcome | `Subtask #110890 created under parent #106447 (assigned to Abhishek). Slack handoff drafted (copy from row page).` |
+| Project | `Solstice WordPress Website (#8393)` |
+| Source Systems | `Gmail` |
+| AI Notes | `Parent picked: #106447 (Reference) — only PM-owned task open on this project.` |
 
-## Sample row — uncertainty flagged (for reference)
+## Sample row — Reassign (reassign bucket: Ad-hoc / Maintenance only)
 
 | Column | Value |
 |---|---|
-| Summary | `TechCo — project at 85% budget. 15 hrs remaining across 3 open tasks. Estimated overage: 3 hours.` |
+| Summary | `Reassign Brother Plesk #109958 — patch ETA needs WP Maintenance ownership. To WP dev.` |
+| Status | `Approved` |
+| Recommended Action | `Reassign task #109958 to Atul (WP) + Slack handoff` |
+| Recommended Assignee | `Atul Mehra (WP) — WP Maintenance lead, 2 prior tasks on Brother last 3mo` |
+| PM Notes | *(empty)* |
+| Outcome | `Reassigned task #109958 → Atul. Slack handoff drafted (copy from row page).` |
+| Project | `Brother Site Issues (#8461) — Maintenance` |
+| Source Systems | `Orbit, Fathom` |
+| AI Notes | *(empty)* |
+
+## Sample row — Uncertain which task to reassign (reassign bucket)
+
+| Column | Value |
+|---|---|
+| Summary | `Reassign Process Barron #15949 — backend hours-overrun handoff. To BE dev.` |
 | Status | `Recommended Action` |
-| Recommended Action | `Flag to PM for decision. No immediate assignment.` |
+| Recommended Action | `Reassign + Slack handoff (assignee not picked — see AI Notes)` |
 | Recommended Assignee | `—` |
 | PM Notes | *(empty)* |
-| Outcome | *(empty — Mode 2 will skip this row because it's at Recommended Action with no note)* |
-| Project | `TechCo Platform Redesign` |
-| Source Systems | `Orbit` |
-| AI Notes | `Uncertain: I don't know if this relates to the newly-scoped Phase 2 or only the existing quoted hours. You may want to check with Caitlin before flagging to the client.` |
-
-## Sample row — PM note overrides (for reference)
-
-| Column | Value |
-|---|---|
-| Summary | `GrowthLab — David asked if blog section is in scope or needs change order. Small addition.` |
-| Status | `Approved` |
-| Recommended Action | `Create subtask + reply to David + Slack Vijay` |
-| Recommended Assignee | `Vijay Patel (FE)` |
-| PM Notes | `assign to Ravi instead, he knows their codebase from Phase 1` |
-| Outcome | `Subtask created in Orbit. Reply drafted to David (saved to Gmail). Slack sent to Ravi with context.` |
-| Project | `GrowthLab Website Phase 2` |
-| Source Systems | `Gmail` |
-| AI Notes | `PM note changed assignee Vijay → Ravi. Honored. Ravi worked on Phase 1 and knows the custom WordPress theme.` |
+| Outcome | *(empty — Mode 2 skips because no assignee picked)* |
+| Project | `Process Barron New WP Website (#15949)` |
+| Source Systems | `Orbit, Gmail` |
+| AI Notes | `Uncertain: signal could apply to task #15949 (Backend Functionality) or task #15952 (Map Functionality - Script). Both overran hours yesterday. Please pick which to reassign.` |
 
 ---
 

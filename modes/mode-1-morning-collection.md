@@ -60,6 +60,20 @@ If a collector fails (MCP unavailable, auth expired), do not abort Mode 1. Log a
 
 This note is included in the summary section at the top of the dated page.
 
+### Step 3.5 — Post-collector assertion (MANDATORY)
+
+Before passing signals to the matcher, verify the Orbit collector actually invoked its non-skippable tool sequence. This guards against the runtime LLM taking a "fast path" that pulls workload metadata only and silently drops every comment + activity-log entry inside the lookback window.
+
+Run the following checks on the Mode 1 tool trace and Orbit signals list:
+
+1. **`get_activity_log` call count must be ≥ 1.** If zero, abort Mode 1 with a hard error. Write the dated page with a single callout block at the top: `Mode 1 aborted — Orbit collector skipped get_activity_log. No queue generated. See Run Log for trace.` Log to Run Log with code `mode1_abort: orbit_activity_log_skipped`. Do NOT write a queue database. Do NOT proceed to synthesis. The PM sees a clear failure on the page instead of a misleadingly-clean queue built on incomplete data.
+
+2. **Orbit signals list contains ≥ 1 entry with `signal_type` in {`activity_log_entry`, `new_comment`, `status_change`, `new_task`}** — OR — the Orbit activity log call returned a documented empty result (`{}` / `data: []`) for every project in the universe. If the call count is 1+ but signals contain zero of those types AND at least one project returned non-empty activity, log a warning `orbit_collector_signals_dropped` to Run Log and continue. The PM will see "0 Orbit signals captured this morning" in the page summary as a soft flag.
+
+3. **Tool trace must show NO `get_user_workload` calls outside the no-history fallback path.** `get_user_workload` is reserved for `synthesis/pod-inference.md` per `SKILL.md` non-negotiable rule #6. If `get_user_workload` was called before any `get_activity_log` call (i.e., used as a substitute), log warning `orbit_collector_used_workload_as_substitute` and continue — the assertion in #1 has already caught the deeper miss.
+
+Output of this step: either a hard abort (case 1) or a clean signals list with warnings logged (cases 2–3). Only on clean pass does synthesis run.
+
 ### Step 4 — Synthesize
 
 Feed all collected signals into `synthesis/matcher.md`. The matcher:
@@ -79,7 +93,7 @@ Call `writers/notion.md` to:
 3. Resolve / create the Year heading-toggle block on the parent body (e.g., `2026`). Resolve / create the Month heading-toggle block inside it (e.g., `April`). Create today's dated sub-page (Notion-tree parent = parent page) and insert its `child_page` block at the TOP of the Month toggle's children. Title format: `DD Month YYYY` (e.g., `25 April 2026`). Per `schemas/parent-page.md` for the hybrid Year/Month-toggle + Day-sub-page structure. **If a `child_page` block matching today's title already exists in that Month toggle, do NOT overwrite and do NOT prompt.** Append a numeric rerun suffix and create a new sub-page: `25 April 2026 (rerun 2)`, `25 April 2026 (rerun 3)`, etc. Pick the lowest unused suffix. The original page is left untouched.
 4. Write content into today's page:
    a. **Top of page: `Ready for Execution` toggle** — a to-do-style checkbox block, unchecked by default, labeled clearly
-   b. **Summary line** — "N items for your morning. X new assignments, Y reassignments, Z FYI."
+   b. **Summary line** — "N items for your morning. X reassignments, Y new sub-tasks. <M signals filtered — see Run Log if you want to audit>."
    c. **Inline Morning Queue database** — schema from `schemas/morning-queue-database.md`, one row per item
 5. For each row, populate the detail page with the heading-based layout from `schemas/row-detail-page.md`:
    - Summary heading
