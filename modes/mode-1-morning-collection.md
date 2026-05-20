@@ -93,7 +93,7 @@ Call `writers/notion.md` to:
 3. Resolve / create the Year heading-toggle block on the parent body (e.g., `2026`). Resolve / create the Month heading-toggle block inside it (e.g., `April`). Create today's dated sub-page (Notion-tree parent = parent page) and insert its `child_page` block at the TOP of the Month toggle's children. Title format: `DD Month YYYY` (e.g., `25 April 2026`). Per `schemas/parent-page.md` for the hybrid Year/Month-toggle + Day-sub-page structure. **If a `child_page` block matching today's title already exists in that Month toggle, do NOT overwrite and do NOT prompt.** Append a numeric rerun suffix and create a new sub-page: `25 April 2026 (rerun 2)`, `25 April 2026 (rerun 3)`, etc. Pick the lowest unused suffix. The original page is left untouched.
 4. Write content into today's page:
    a. **Top of page: `Ready for Execution` toggle** — a to-do-style checkbox block, unchecked by default, labeled clearly
-   b. **Summary line** — "N items for your morning. X reassignments, Y new sub-tasks. <M signals filtered — see Run Log if you want to audit>."
+   b. **Summary line** — "N items for your morning. X sub-tasks, Y flags. <M signals filtered — see Run Log if you want to audit>."
    c. **Inline Morning Queue database** — schema from `schemas/morning-queue-database.md`, one row per item
 5. For each row, populate the detail page with the heading-based layout from `schemas/row-detail-page.md`:
    - Summary heading

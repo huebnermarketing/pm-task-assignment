@@ -150,7 +150,7 @@ Return to Mode 2 with the outcome string for the row:
 
 ## Pod Daily Task block (end-of-Mode-2 digest)
 
-Separate from the per-row drafts above. After all rows are processed, Mode 2 Step 9a builds a single **Pod Daily Task** copy-block at the bottom of the dated page — a concatenated list of every task created or reassigned that day, formatted to be pasted directly into the pod's daily task Slack channel. This is **not** a Slack-API send; the executor does not touch Slack for the digest. The build itself is handed to `writers/notion.md` — Flow — appending the Pod Daily Task block. Configuration lives in `schemas/preferences-page.md` — Pod Daily Task Block.
+Separate from the per-row drafts above. After all rows are processed, Mode 2 Step 9a builds a single **Pod Daily Task** copy-block at the bottom of the dated page — a concatenated list of every sub-task created that day, formatted to be pasted directly into the pod's daily task Slack channel. This is **not** a Slack-API send; the executor does not touch Slack for the digest. The build itself is handed to `writers/notion.md` — Flow — appending the Pod Daily Task block. Configuration lives in `schemas/preferences-page.md` — Pod Daily Task Block.
 
 ## AM Daily Ping block (end-of-Mode-2 digest)
 

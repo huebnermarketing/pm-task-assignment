@@ -110,7 +110,7 @@ Recommended Action ─► Approved (by PM)         ─► Done (by Mode 2)
 | Default value | Empty |
 | Populated when | Mode 2 finishes processing this row (success or failure) |
 | Format | Concise, specific, with Orbit links where applicable |
-| Sample values | `Task created → Orbit #105892. Slack sent to Vijay. Caitlin emailed.` <br> `Reassigned from Amit → Rohit. Slack sent to Rohit with context.` <br> `Email draft saved to your Gmail (not sent per your note).` <br> `FAILED — Gmail timeout. Will retry on next execution run if re-approved.` |
+| Sample values | `Subtask #110890 created under parent #110464. Slack draft for Hitesh appended below.` <br> `Subtask #110918 created under parent #109958. Severity bumped to Important per your note. Slack draft appended below.` <br> `Flag row — no Mode 2 action.` <br> `FAILED — Orbit create_subtask returned 409. Will retry if re-approved.` |
 
 ### Column 7 — `Project` (HIDDEN from default view)
 

@@ -29,7 +29,7 @@ A revised action plan:
 {
   "action_plan": [
     {
-      "type": "create_task" | "reassign" | "update_task" | "add_comment" | "change_due_date" | "create_subtask" | "draft_email" | "send_email" | "send_slack" | "skip",
+      "type": "create_subtask" | "update_task" | "add_comment" | "change_due_date" | "send_slack" | "skip",
       "executor": "orbit" | "email" | "slack" | "none",
       "parameters": { ... },
       "why": <string — one-line justification tied to the note>
@@ -47,7 +47,7 @@ If `confidence = low`, the executors do NOT run. Instead, the row's Outcome colu
 
 ### "assign to X" / "X should do it" / "give it to X"
 
-- Action: change the assignee for the task creation or reassignment
+- Action: change the assignee for the sub-task being created
 - Look up X in the pod (via `synthesis/pod-inference.md`) — if found, use that user ID
 - If X is not in the pod, still honor the override and log `AI Notes: Assigned to X per your note — outside inferred pod.`
 - If X is ambiguous (multiple people match), flag clarification: `Multiple people match "X": [list]. Please specify.`
@@ -137,10 +137,10 @@ In those cases, set `confidence = low` and populate `clarification_needed` with 
 
 ## Examples — full input/output
 
-### Example 1 — simple reassign
+### Example 1 — assignee override on a sub-task
 
 **Input:**
-- Original recommended assignee: `Vijay Patel (FE) — 12 hrs free this week`
+- Row: `Create subtask on Solstice WP #106447 — Swap Contact Form brochure PDF. To Atul.`
 - PM Note: `assign to Ravi instead, he knows their codebase from Phase 1`
 
 **Output:**
@@ -148,9 +148,9 @@ In those cases, set `confidence = low` and populate `clarification_needed` with 
 {
   "action_plan": [
     {
-      "type": "create_task",
+      "type": "create_subtask",
       "executor": "orbit",
-      "parameters": { "assignee": <Ravi's user ID>, "... rest same as original ..." },
+      "parameters": { "parent_id": 106447, "assignee": <Ravi's user ID>, "... rest same as original ..." },
       "why": "PM overrode the assignee to Ravi based on Phase 1 codebase familiarity."
     },
     {

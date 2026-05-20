@@ -277,12 +277,13 @@ The body content depends on the row's action:
 
 ### Job 8 — Generate the proposed Slack handoff
 
-The Slack handoff message is the team-Slack DM the PM copies-and-sends after Mode 2 fires (per `executors/slack.md`). Generate it for BOTH paths:
+The Slack handoff message is the team-Slack DM the PM copies-and-sends after Mode 2 fires (per `executors/slack.md`). Generate it for the **Create subtask** path only:
 
-- **Reassign path** — tell the new assignee what's moving to them, why, and the task URL.
-- **Create subtask path** — tell the assignee a new sub-task landed, why, the parent context, and the task URL.
+- Tell the assignee a new sub-task landed under the PM's parent task, the work in one short paragraph, the parent context, and the sub-task URL.
 
 Plain language per `writers/plain-language.md`. Reminder to log hours if Preferences has that always-include rule.
+
+Flag rows do NOT generate a Slack handoff (no dev work to delegate; PM owns the next move).
 
 NO Slack handoff is generated for AMs or clients — those are PM-handled outside the queue per the Output gating filter.
 

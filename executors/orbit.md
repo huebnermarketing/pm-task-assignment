@@ -35,15 +35,13 @@ Same as create_task, but add `parent_id` pointing to the parent task.
 
 Subtask titles should include the parent context. Example: `[Agency X Homepage] QA: verify mobile breakpoints`.
 
-### Assign or reassign a task
+### Assign a new (sub)task
 
-For NEW tasks: pass `assignee` at creation time.
+Pass `assignee` at create_subtask time.
 
-For EXISTING tasks (reassignments): use `mcp__...orbit.update_task` with `task_id` and new `assignee`.
+Reassignment is **not** a queue-driven action under the current Output gating rule (`synthesis/matcher.md` — `Create subtask` and `Flag` are the only two queue actions). Ad-hoc and Maintenance signals that previously triggered Reassign now become `Create subtask` rows under the PM-owned parent.
 
-When reassigning:
-- Add an Orbit comment explaining the reassignment (general/internal comment)
-- Example comment: `Reassigned from [old assignee] to [new assignee] on [date]. Reason: [brief reason from source signal or PM note]. Original assignment context is above.`
+Reassignment via PM note (e.g., `PM Notes: actually assign to Ravi instead`) is still possible — `synthesis/note-interpreter.md` resolves the override BEFORE the create_subtask call fires, so the sub-task is created with the corrected assignee from the start. There is no post-create reassignment path in Mode 2.
 
 ### Update a task
 
@@ -87,9 +85,6 @@ Standard comment templates:
 
 **When starting work:**
 > "Starting work on this. My understanding of the requirement: [1-2 sentence summary]. Will update with progress."
-
-**When reassigning:**
-> "Reassigned from [old] to [new] on [date]. Reason: [reason]."
 
 **When marking complete:**
 > "Completed. Here's what I did: [summary]. Staging URL: [link]. Self-QA: [what I checked]. Notes: [deviations or things to watch for in QA]."
@@ -155,13 +150,12 @@ If the task was derived from a document (PDF, image, PPT) that the skill read vi
 ## After all operations for a row
 
 Build the `Outcome` string for the Morning Queue row. Format is concise and specific:
-- `Task created → Orbit [link]`
-- `Reassigned [old] → [new] in Orbit [link]`
-- `Status updated → [new status] in Orbit [link]`
-- `Due date changed → [new date] in Orbit [link] (category: [category])`
-- `Subtask created → Orbit [link]`
+- `Subtask #<id> created under parent #<parent_id> → Orbit [link]`
+- `Status updated → [new status] in Orbit [link]` (PM-note override only)
+- `Due date changed → [new date] in Orbit [link] (category: [category])` (PM-note override only)
+- `Severity bumped → [new severity] in Orbit [link]` (PM-note override only)
 
-Multiple operations combine with periods: `Task created → Orbit [link]. Slack sent to Vijay.`
+Multiple operations combine with periods: `Subtask #110890 created under parent #110464 → Orbit [link]. Slack draft for Hitesh appended below.`
 
 ## What this executor does NOT do
 

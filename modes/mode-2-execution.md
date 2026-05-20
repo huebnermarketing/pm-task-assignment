@@ -133,14 +133,17 @@ For each row, decide what to do:
 
 For each row that needs action:
 
-1. Load the row's detail page content to understand full context (Sources, proposed Orbit task body, proposed Slack, proposed email).
-2. If there's a PM note, feed it to `synthesis/note-interpreter.md` to resolve the intent and override parts of the recommendation.
-3. Route to the appropriate executors based on the action type:
-   - **Orbit operations** (create task, assign, update status, change due date, comment, create project, subtask) → `executors/orbit.md`. Due date paths A/B per `references/due-date-categories.md`.
-   - **Email** (drafts only, never auto-send except the documented exceptions) → `executors/email.md`
-   - **Slack** — team and AM handoffs default to `Slack draft appended to Notion` (no Slack API send). Real send only when allowed: PM self-summary, escalation backup ping, or explicit PM `send` note with audience = team. See `executors/slack.md`.
-4. Before calling any executor, pass every string the assignee (delivery team) will read through `writers/plain-language.md` to enforce 4th–5th grade English.
-5. Pass every source reference through `writers/source-citation.md` to ensure proper citation format.
+1. Identify row type from the Summary verb: `Create subtask on …` or `Flag …`.
+2. **Flag rows do not execute.** Mode 2 skips Flag rows entirely. The row stays at its current Status (PM marks `Skip. No Action Needed` manually once they resolve the flagged item externally). Log: `Flag row — no Mode 2 action.` Move on.
+3. **Create subtask rows** — load the row's detail page content (Action Block callout at top, proposed Orbit task body, proposed Slack handoff, sources).
+4. If there's a PM note, feed it to `synthesis/note-interpreter.md` to resolve the intent and override parts of the recommendation. Notes may change the assignee, the parent task, severity, or due date — but cannot change the row type.
+5. Route to the appropriate executors:
+   - **Orbit** — `executors/orbit.md` Create-subtask path: `parent_id = parent_task_id`, `assignee_id = recommended_assignee`, `description = proposed_orbit_body`. PM-note overrides (severity, due date, follower add) are applied as additional `update_task` or `change_task_due_date` calls AFTER the subtask is created.
+   - **Slack** — team handoff defaults to `Slack draft appended to Notion` (no Slack API send). Real send only when allowed: PM self-summary, escalation backup ping, or explicit PM `send` note with audience = team. See `executors/slack.md`.
+6. Before calling any executor, pass every string the assignee (delivery team) will read through `writers/plain-language.md` to enforce 4th–5th grade English.
+7. Pass every source reference through `writers/source-citation.md` to ensure proper citation format.
+
+Note: Email drafting paths (`executors/email.md`) are no longer triggered by queue rows — client and AM emails are PM-handled under the new gating rule. The email executor remains for operational sends (escalation backup ping, PM self-summary if email-configured) only.
 
 ### Step 7 — Update the row after execution
 
@@ -149,10 +152,10 @@ For each row, after all its actions execute:
 1. Flip `Status` to `Done`.
 2. Write the `Outcome` column with a short line describing what was done. Format: concise, specific, include Orbit links where applicable.
    - Examples:
-     - `Task created → Orbit #105892. Slack draft for Vijay appended below. Email draft to Caitlin saved to Gmail.`
-     - `Reassigned from Amit → Rohit. Slack draft for Rohit appended below.`
-     - `Email drafted (saved to Gmail drafts — not sent per your note).`
-     - `Task status updated in Orbit. AM draft appended below.`
+     - `Subtask #110890 created under parent #110464. Slack draft for Hitesh appended below.`
+     - `Subtask #110918 created under parent #109958. Slack draft for Atul appended below.`
+     - `Subtask created → Orbit #110523. Severity bumped to Important per your note. Slack draft appended below.`
+     - `FAILED — Orbit subtask create returned 409 duplicate. Will retry if re-approved.`
 3. If a Slack team / AM handoff was produced, the writer appends the draft body under the row's detail page (per `writers/notion.md` Flow — updating rows after Mode 2). The PM copies it from Notion into Slack on their own.
 
 ### Step 8 — Handle failures per row
@@ -172,9 +175,10 @@ After the per-row loop completes (success and failure rows both processed), asse
 Hand to `writers/notion.md` — Flow — appending the Pod Daily Task block.
 
 Inputs the builder collects:
-- Every row whose Outcome string records an Orbit task create or reassign (new `Task created → Orbit #...` or `Reassigned from X → Y`).
+- Every row whose Outcome string records an Orbit subtask create (`Subtask #... created under parent #...`).
 - For each qualifying row, pull from the executor return values: `client_name`, `project_name`, `task_title`, `task_id`, `orbit_task_url`, `assignee_first_name`, `assignee_full_name`.
 - Preserve matcher order (the same order the rows appear in the Morning Queue database).
+- Flag rows are NEVER included in the Pod Daily Task block (no Orbit task was created).
 
 Skip silently if zero rows qualify or if `pod_daily_task_enabled = false`.
 
@@ -183,7 +187,7 @@ Skip silently if zero rows qualify or if `pod_daily_task_enabled = false`.
 Hand to `writers/notion.md` — Flow — appending the AM Daily Ping block.
 
 Inputs the builder collects:
-- The same qualifying-row set (filtered by this section's own `include_reassignments` flag).
+- The same qualifying-row set as Step 9a (subtask-create rows only — Flag rows excluded).
 - Grouping: map each qualifying row to its AM via the Preferences Account Managers → Projects associations. Drop rows with no AM. Drop AMs listed in `quiet_ams`.
 - For each AM group: the AM identity fields from Preferences, plus the bundle of row contexts (summaries, recommended actions, resolved assignees) needed for the writer's drafting call.
 
@@ -198,19 +202,18 @@ After the digest block is appended (or skipped), send a Slack DM to the PM summa
 ```
 Your morning queue executed.
 
-✅ 7 of 9 actions taken:
-  • Agency X homepage task created → Slack draft for Vijay appended in today's queue
-  • DigitalFirst 3 action items created → Slack drafts for Ravi + Amit appended
-  • GrowthLab blog reassigned to Ravi (per your note) → Slack draft appended
-  • CloudBase QA handoff → Slack draft for Mannan appended
-  • Reply drafted to Jane (Agency X, saved to Gmail drafts)
-  • AM email draft for Caitlin saved to Gmail
+✅ 4 of 5 sub-tasks created:
+  • Solstice WP brochure swap → Subtask #110890 under parent #106447. Slack draft for Atul appended in today's queue.
+  • Brother Plesk patch ETA → Subtask #110918 under parent #109958. Slack draft for Atul appended.
+  • ECP AI Visibility audit → Subtask #110945 under parent #110464. Slack draft for Hitesh appended.
+  • Conversant dev side implementation → Subtask #110961 under parent #109744 (assigned to Ravi per your note). Slack draft appended.
 
-⚠️ 1 held back:
-  • TechCo budget alert — your note said "save as draft, check with Caitlin first". Draft saved in Gmail. No other action taken.
+🚩 2 flags acknowledged (no auto-action):
+  • 2010 Solutions — Ellen needs dev names for 27 May call. PM reply pending.
+  • Find a Rep training brief — team needs heads-up before Wed 20 May.
 
 ❌ 1 failed:
-  • BrightPath proposal — Gmail MCP timed out. Retry by typing `PM Task Assignment, run execution now` or wait for tomorrow.
+  • BrightPath proposal subtask — Orbit create_subtask returned 409 duplicate. Retry by typing `PM Task Assignment, run execution now` or wait for tomorrow.
 
 Open today's Notion queue page to copy the Slack drafts and send them to your team / AMs.
 

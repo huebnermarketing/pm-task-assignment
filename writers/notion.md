@@ -66,7 +66,7 @@ Content order:
    - Any collector failures (if any)
 
 3. **Summary line**
-   - One line: `N items for your morning. X new assignments, Y reassignments, Z FYI.`
+   - One line: `N items for your morning. X sub-tasks, Y flags. <M signals filtered — see Run Log if you want to audit>.`
 
 4. **Inline Morning Queue database**
    - Create via `notion-create-database` with the parent as this dated page.
@@ -138,7 +138,6 @@ Pull the **Pod Daily Task Block** section from the cached Preferences page (alre
 
 - `pod_daily_task_enabled` (bool) — if `false`, skip the entire flow, no run-log entry needed.
 - `pod_daily_task_slack_channel` (string, reference only — never used to send).
-- `include_reassignments` (bool).
 - `caption_template` (string).
 - `date_label_template` (string).
 - `task_heading_template` (string).
@@ -153,10 +152,10 @@ If any template or layout field is missing or empty on the Preferences page, fal
 
 ### Step 2 — Qualify rows
 
-Include a row only if Mode 2 executed an Orbit task create or reassign for it in this run. Specifically:
-- Include rows whose Outcome string records a new Orbit task ID (`Task created → Orbit #...`).
-- Include rows whose Outcome string records an explicit reassignment (`Reassigned from X → Y`) ONLY IF `include_reassignments` is `true`.
-- Exclude rows with `Status = Skip. No Action Needed`, `Status = Recommended Action` (PM didn't approve), `HELD`, `FAILED`, status-only updates, comment-only updates, email-only drafts, and any row that didn't touch Orbit task ownership.
+Include a row only if Mode 2 executed an Orbit subtask create for it in this run. Specifically:
+- Include rows whose Outcome string records a new Orbit subtask ID (`Subtask #... created under parent #...`).
+- Exclude `Flag` rows entirely (no Orbit write happened).
+- Exclude rows with `Status = Skip. No Action Needed`, `Status = Recommended Action` (PM didn't approve), `HELD`, `FAILED`, and any row whose Outcome doesn't record a subtask create.
 - If zero rows qualify, do NOT append an empty block (anchor included). Skip silently and log `pod_digest_skipped: no_qualifying_rows` in the run-log.
 
 Preserve matcher order for the included rows.
@@ -247,7 +246,6 @@ Runs immediately after the Pod Daily Task block flow completes. Same shape: fixe
 Pull the **AM Daily Ping Block** section. Read every field:
 
 - `am_ping_enabled` (bool) — if `false`, skip the entire flow, no run-log entry needed.
-- `include_reassignments` (bool, scoped to this section — independent of the Pod Daily Task switch).
 - `quiet_ams` (list of AM names to skip).
 - `am_ping_caption_template` (string).
 - `am_heading_template` (string).
@@ -258,8 +256,8 @@ Fall back to defaults per `schemas/preferences-page.md` for any missing or empty
 
 ### Step 2 — Qualify and group rows by AM
 
-Walk the same set of rows used by the Pod Daily Task qualification (Step 2 of that flow), with these differences:
-- Use this section's `include_reassignments` flag, not the Pod section's.
+Walk the same set of rows used by the Pod Daily Task qualification (Step 2 of that flow): subtask-create rows only, Flag rows excluded.
+
 - For each qualifying row, determine which AM owns it by matching the row's `Project` value against the AM-to-Projects associations in the Preferences Account Managers section. A row may map to zero AMs (no AM owns the project) or one AM. Rows that map to zero AMs are not part of any per-AM ping.
 - After grouping, drop any AM listed in `quiet_ams`.
 - After grouping, drop any AM with zero qualifying rows.

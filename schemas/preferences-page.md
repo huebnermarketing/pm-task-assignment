@@ -112,7 +112,6 @@ The skill reads every field on every Mode 2 run. Token substitution is literal �
 
 - **Pod daily task enabled:** `true` (default) | `false`. When `false`, Mode 2 skips the digest build entirely. The PM self-summary's closing line is omitted.
 - **Pod daily task Slack channel:** free-text reference, e.g., `#pod-daily-tasks`. The skill does NOT post here — this is a reminder for the PM about where to paste. Empty by default.
-- **Include reassignments:** `true` (default) | `false`. When `false`, only newly-created Orbit tasks appear in the digest; reassignments are excluded.
 
 #### Templates
 
@@ -265,7 +264,6 @@ The per-AM body is **drafted by the skill, not a pure template** — it summariz
 #### Behavior switches
 
 - **AM ping enabled:** `true` (default) | `false`. When `false`, Mode 2 skips this block entirely.
-- **Include reassignments:** `true` (default) | `false`. When `false`, only newly-created Orbit tasks count toward an AM's daily ping eligibility.
 - **Quiet AMs:** bulleted list of AM names to skip from the digest even when they have qualifying work today. Empty by default. Useful for AMs who explicitly opted out of daily pings.
 
 #### Templates
