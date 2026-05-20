@@ -26,30 +26,42 @@ If a signal involves an email address that doesn't match the canonical OR any al
 
 The Morning Queue exists to drive **two AI actions and only two**:
 
-1. **Reassign existing Orbit task to a developer** — applies to projects whose Orbit `project_type` is in the **reassign bucket**: `Ad-hoc`, `Maintenance` ONLY. Existing task already sits with a dev; signal indicates current owner needs to change.
-2. **Create sub-task under the PM's own parent task on that project** — applies to ALL other project types (`Fixed Cost`, `SaaS`, `PPC`, `Hosting`, `Hourly`, `Repeat`, plus any new project type Orbit may add). Parent task **must be currently assigned to the running PM** (`assignee_id == PM_user_id`). Sub-task gets the full 6-section `schemas/orbit-dq-standard.md` body.
+1. **Create sub-task under the PM's own parent task on that project** — universal across every project type (`Fixed Cost`, `SaaS`, `PPC`, `Hosting`, `Hourly`, `Repeat`, `Ad-hoc`, `Maintenance`, plus any new project type Orbit may add). Parent task **must be currently assigned to the running PM** (`assignee_id == PM_user_id`). Sub-task carries an explicit `task_title` AND the full 6-section `schemas/orbit-dq-standard.md` brief. There is no project-type bucket split — every actionable signal becomes a sub-task. (Previously Ad-hoc/Maintenance used a separate "Reassign" path; that path is retired — Ad-hoc/Maintenance signals now also become sub-tasks under the PM's parent so the team handover follows the same shape every time.)
+2. **Flag overnight signal for PM attention** — for signals the PM needs to see and act on personally, where AI cannot create a sub-task (no clear dev work to delegate, or the next move is PM-owned: email a client, decide a scope question, reply to an AM). Flag rows carry summary + sources + suggested PM-next-step. They do NOT execute in Mode 2 — they sit as a PM-readable item that the PM resolves manually (then marks `Skip. No Action Needed`).
 
-The "PM's own task on that project overnight" semantic is the load-bearing constraint for path 2: the PM holds a parent task for each active engagement (e.g., the engagement's umbrella "Discovery", "Reference", or named meeting/milestone task). Sub-tasks for that engagement land under the PM's parent so the PM remains the project's coordination anchor in Orbit. If no PM-owned task exists on a project that needs new work, the matcher cannot create the sub-task — see Job 5 "Picking the parent task" for the fallback.
+The "PM's own task on that project overnight" semantic is the load-bearing constraint for path 1: the PM holds a parent task for each active engagement (e.g., the engagement's umbrella "Discovery", "Reference", or named meeting/milestone task). Sub-tasks for that engagement land under the PM's parent so the PM remains the project's coordination anchor in Orbit. If no PM-owned task exists on a project that needs new work, the row downgrades to a Flag row asking the PM to seed a parent task — see Job 5 "Picking the parent task" for the fallback.
 
-Every signal that cannot reduce to one of these two actions is **dropped from the queue**. The PM scans Orbit directly for status reviews, FYI items, and AM coordination. Dropped signals are not lost — they are recorded in the Run Log detail page under a `Filtered signals` section so the PM can audit what was suppressed and why (see Job 11).
+Every signal that cannot reduce to one of these two actions — AND that the PM has already handled overnight (see "PM-action detection" below) — is **dropped from the queue**. Dropped signals are recorded in the Run Log detail page under a `Filtered signals` section so the PM can audit what was suppressed and why (see Job 11).
 
-### Drop list (explicit — do NOT emit a queue row for any of these)
+### Drop list (do NOT emit a queue row for any of these)
 
-- Pure FYI rows (no action the PM personally must take inside Orbit on the assignee axis).
-- "PM coordination" or "PM-managed wait state" rows (`recommended_assignee = —`).
-- Rows where the next move belongs to an AM or the client (chase email, AM Slack ping, status nudge).
-- Rollup rows aggregating multiple stale tasks for PM review.
-- Status updates the PM would do themselves on Orbit (move-to-In-Review, due-date bump, close).
-- Comment-only follow-ups the PM would post themselves.
-- Email drafts to clients / AMs (PM writes those manually in Gmail).
-- Hours-overrun alerts (`no-reply@whitelabeliq.com` notifications). Already handled by Orbit hours flow per PM feedback.
-- Standup / Daily Status recap rows where no Orbit assignment changes.
+The matcher checks the drop list BEFORE deciding Create-subtask vs Flag. If a signal matches a drop reason, no row is emitted; the signal goes to `filtered_signals`.
 
-If the matcher finds itself drafting a row that doesn't end in either `Reassign task #X to <name>` or `Create subtask under #X with brief`, the row is filtered and logged.
+- Hours-overrun alerts (`no-reply@whitelabeliq.com` notifications). Already surfaced by Orbit hours flow per PM feedback.
+- PM's own Orbit tasks due today / overdue / status changes that the PM will see in Orbit's own due-date UI.
+- Rollup digests aggregating stale tasks for PM review (PM scans Orbit directly).
+- Standup / Daily Status meeting recaps where every action item lands on someone else (no Orbit ownership change for the PM and no PM-action gap).
+- Asana / third-party SaaS automation emails (`no-reply@asana.com`, etc.) outside the closed allowlist.
+- Marketing / onboarding / system emails (Anthropic, Notion, Claude.com welcome emails, calendar invite acks).
+- **Signals the PM already handled overnight** — see PM-action detection rule below. This is the most important new drop reason: yesterday the AI was overshooting by emitting Flag-shaped rows even for signals the PM had replied to / commented on / acted on hours earlier.
+
+### PM-action detection (the no-flag-if-PM-acted rule)
+
+For every signal that survives the static drop list, run a PM-action check before deciding Flag vs Drop:
+
+1. Capture the signal's arrival timestamp (`signal.timestamp` — when the email arrived, when the Orbit comment was posted, when the Slack message landed, when the Fathom call ended).
+2. Look for PM-originated activity in the window `(signal.timestamp, mode1_fire_time)` that matches the signal's context:
+   - **Gmail:** any thread message with `labelIds` containing `SENT` from the PM's canonical email or alias, on the same `threadId` as the signal.
+   - **Orbit:** any task comment authored by the PM (`actor_id == PM_user_id`) on the same task or project, OR any task field change (status, due date, assignee) actored by the PM. From `get_activity_log`.
+   - **Slack:** any message authored by the PM in the same channel or DM thread as the signal.
+3. If matching PM activity is found, drop the signal with `filter_reason: pm_already_handled`. Capture the PM-action timestamp + a one-line note in `filtered_signals` so the audit trail shows what was already resolved.
+4. If no matching PM activity, the signal is unhandled — proceed to Job 5 to decide Create-subtask vs Flag.
+
+This rule directly fixes the over-flagging observed in early runs. The PM action set (Sent emails, Orbit comments, Slack outbound) IS the PM telling the system "I've already got this." The matcher must respect that signal.
 
 ### Project-type lookup
 
-`project_type` comes from the Orbit project metadata returned by `get_project_details` (already in the collector's relationship map). When `project_type` is missing or unresolved, log `project_type_unknown` in the row's filter trace and DROP the row (do not guess). The PM sees the dropped signal in the Run Log; the next morning's run will retry once project metadata is populated.
+`project_type` comes from the Orbit project metadata returned by `get_project_details` (already in the collector's relationship map). When `project_type` is missing or unresolved, log `project_type_unknown` in the filter trace and DROP the row (do not guess). With the bucket split retired, `project_type` is no longer load-bearing for action selection — the matcher uses it for project-shape context only (the brief mentions the project type so the assignee sees it).
 
 ## What the matcher produces
 
@@ -121,67 +133,76 @@ Normal professional English. This is what the PM reads when scanning the queue. 
 
 | Verb | Used when |
 |---|---|
-| `Reassign` | Project type = Ad-hoc OR Maintenance. Existing dev-owned Orbit task is changing hands. |
-| `Create subtask` | Project type = everything else (Fixed Cost / SaaS / PPC / Hosting / Hourly / Repeat / any other). Net-new scoped work landing under the PM's own parent task on the project. |
+| `Create subtask` | Net-new scoped work landing under the PM's own parent task on the project. Universal across project types — including Ad-hoc and Maintenance. |
+| `Flag` | Signal needs PM attention but is not delegate-able (PM owns next move: client email, scope decision, AM reply). No auto-execution. |
 
-These are the ONLY two starting verbs a queue row's Summary may use. If the matcher cannot frame the row with one of these two, the row was misclassified — re-run the Output gating filter and drop it.
+These are the ONLY two starting verbs a queue row's Summary may use. If the matcher cannot frame the row with one of these two, the row was misclassified — re-run the Output gating filter and either drop or downgrade.
 
 #### Summary patterns
 
-Pattern A — Reassign:
+Pattern A — Create subtask:
 ```
-Reassign <project short name> #<task_id> — <one-clause why>. To <role>.
+Create subtask on <project short name> #<parent_task_id> — <proposed sub-task title>. To <assignee first name>.
 ```
 
-Pattern B — Create subtask:
+Pattern B — Flag:
 ```
-Create subtask under <project short name> #<parent_task_id> — <one-clause what>. To <role>.
+Flag <project or topic short name> — <one-clause why PM needs to look>. PM action.
 ```
 
 Examples:
-- `Reassign Brother Plesk #109958 — patch ETA needs WP Maintenance ownership. To WP dev.`
-- `Reassign Process Barron Hours #15949 — backend overrun handoff. To BE dev.`
-- `Create subtask under Solstice WP #8393 — swap Contact Form brochure PDF. To WP dev.`
-- `Create subtask under BoyarMiller Practice Area #103623 — draft Real Estate page outline. To Content.`
+- `Create subtask on ECP AI Visibility Audit #110464 — Run AI Visibility audit on approved competitor list. To Hitesh.`
+- `Create subtask on Solstice WP #106447 — Swap Contact Form brochure PDF. To Atul.`
+- `Create subtask on Brother Plesk #109958 — Investigate patch ETA with WP Maintenance. To Atul.`
+- `Flag 2010 Solutions — Ellen needs dev names for 27 May call. PM action.`
+- `Flag Conversant FTP — credentials still missing, blocking dev work today. PM action.`
 
 Rules:
 - First token is one of the two locked verbs. No other openers.
 - Project short name = client-readable phrase, max 4 words. Strip the long Orbit project title.
-- Task ID always present (the row is anchored to a specific Orbit task).
-- Why / what clause = 6–10 words, identifying the work, not narrating context.
-- Role at the end = the role-hint label the matcher resolved in Job 6.
-- No emojis. No leading client name without verb. No narrative.
+- For `Create subtask`: parent task ID + the proposed sub-task title MUST appear in the summary. PM reads the title in the column without opening the row detail page.
+- For `Flag`: no Orbit task ID required; suffix `PM action` so PM knows at-a-glance there is no auto-execute.
+- Use the assignee's FIRST name only in the summary (full name lives in `Recommended Assignee` column).
+- No emojis. No narrative context.
 - Max 120 chars total (Notion title field stays scannable across the column).
 
 ### Job 5 — Recommend the action (2 actions only)
 
 The action set is closed and matches the Output gating section above. Pick exactly one:
 
-- **Reassign** — existing Orbit task moves from current assignee to a new one. Reassign bucket only (`project_type` ∈ {`Ad-hoc`, `Maintenance`}). Output: target `task_id` (existing) + new `assignee_id`. No new task is created. No 6-section body needed (a short Orbit comment captures the reason, drafted in Job 7).
-- **Create subtask with brief** — new sub-task is created in Orbit under the **PM-owned parent task** on the project. Applies to every project type NOT in the reassign bucket. Output: `parent_task_id` (which must be a task with `assignee_id == PM_user_id`), new sub-task title, full 6-section body per `schemas/orbit-dq-standard.md` written in plain language, `assignee_id` for the sub-task.
+- **Create subtask** — new sub-task is created in Orbit under the **PM-owned parent task** on the project. Universal across project types (Ad-hoc and Maintenance included). Output: `parent_task_id` (with `assignee_id == PM_user_id`), `task_title` (the actual sub-task title that will appear in Orbit), `assignee_id` for the dev, full 6-section body per `schemas/orbit-dq-standard.md` in plain language. The task title is generated explicitly and shown in the row Summary so the PM does not need to open the detail page to know what is being created.
+- **Flag** — signal is recorded as a PM-attention row, no Orbit task created, no Mode 2 execution. Output: `pm_next_step` (one short clause describing the next move PM should take — e.g., "Reply to Ellen with the dev names", "Decide whether the FTP creds chase moves to client direct"), no `task_title`, no `proposed_orbit_body`, no `assignee_id`. The Status default is still `Recommended Action`; when the PM resolves the flagged item externally, they mark it `Skip. No Action Needed`.
 
 If neither action fits, the signal does not become a row. Apply the Output gating filter and route to the `Filtered signals` log (Job 11).
 
-#### Picking the existing task to reassign (Reassign path only)
+#### Choosing Create subtask vs Flag
 
-For ad-hoc / maintenance / hosting / hourly / repeat projects, the matcher must select WHICH existing Orbit task the signal targets. Procedure:
+For each signal that survives the drop list AND the PM-action detection check, decide:
 
-1. Pull all open tasks on the project from the relationship map.
-2. Score each task by signal-to-task match: subject keyword overlap with task title, file/feature reference, mentioned task ID in the signal body.
-3. If exactly one task scores meaningfully higher than the rest, pick it. Row Summary cites that task ID.
-4. If two or more tasks tie on score, set `recommended_assignee = null` and write AI Notes: `Uncertain: signal could apply to task #X (<title>) or task #Y (<title>). Please pick which to reassign.` Row is still emitted (one of the two valid actions) but assignee axis flagged.
-5. If no open task on the project meaningfully matches the signal, DROP the row (this is not net-new for an ad-hoc project — most likely the signal is operational chatter the dev already sees in Orbit). Log to Filtered signals.
+1. **Is there a clear dev task to delegate?** If yes — concrete deliverable, identifiable scope, a developer can pick it up and run — choose `Create subtask`. Examples: "swap brochure PDF on Contact Form thank-you emails", "run AI Visibility audit on the approved competitor list", "investigate patch ETA for the Plesk security warning and update the due date".
+2. **Is the next move PM-owned?** If yes — reply to an AM, decide a scope question, brief the team for a meeting, pick which devs attend a call — choose `Flag`. Examples: "Ellen needs dev names for the 27 May Joe Warner call", "FTP credentials still missing — PM decides whether to chase client directly".
+3. **Edge case — Create subtask path requires PM-owned parent.** If `Create subtask` was chosen but the project has NO PM-owned parent task (PM-owned parent pool empty), downgrade to `Flag`. The flag's `pm_next_step` becomes: "Seed a parent task on <project> so future sub-tasks have a home." Do NOT drop the signal; the PM should know they need to create the parent.
 
-#### Picking the parent task for sub-task creation (Create subtask path only)
+#### Picking the parent task for sub-task creation (Create subtask path)
 
 The parent **must be a task currently assigned to the running PM** on the project. Procedure:
 
 1. From the relationship map, list every open task on the project where `assignee_id == PM_user_id`. Call this the PM-owned parent pool for the project.
-2. **If the PM-owned parent pool is empty** — the sub-task cannot be created under this rule. Drop the row and log to `Filtered signals` with `filter_reason: no_pm_owned_parent_task`. The PM sees the dropped signal in the Run Log and can seed a parent task themselves (the next morning's run will then surface it).
+2. **If the PM-owned parent pool is empty** — downgrade the row to `Flag` per the edge case above. Do not drop.
 3. **If the PM-owned parent pool has exactly one task** — that's the parent. Use it.
-4. **If the PM-owned parent pool has multiple tasks** — match the signal to a parent by phase / feature / deliverable keyword overlap with each parent's title. Recency breaks ties (most recently updated parent wins). If two parents tie cleanly on score, set `parent_task_id = null` and write AI Notes: `Uncertain: sub-task could go under PM-owned parent #X (<title>) or #Y (<title>). Please pick.` Row is still emitted; parent axis flagged.
+4. **If the PM-owned parent pool has multiple tasks** — match the signal to a parent by phase / feature / deliverable keyword overlap with each parent's title. Recency breaks ties (most recently updated parent wins). If two parents tie cleanly on score, set `parent_task_id = null` and write AI Notes: `Uncertain: sub-task could go under PM-owned parent #X (<title>) or #Y (<title>). Please pick.` Row is still emitted as Create subtask; parent axis flagged.
 
-Sub-task `assignee_id` (different from `parent_task_id`) is picked via the Job 6 decision tree on the developer pool — same rules as before. The PM owns the parent; the dev owns the child.
+#### Generating the task title (Create subtask only)
+
+The `task_title` is the actual string Orbit will use as the sub-task name AND it appears in the row Summary so the PM reads it at-a-glance. Rules:
+
+- 6–12 words, action-led, verb-first (`Run`, `Build`, `Swap`, `Investigate`, `Draft`, `Review`, `Fix`, `Migrate`, etc.).
+- Names the deliverable concretely. Not "follow up on Bowser things" — say "Build sitemap structure for bowsertrains.com per Angela's plan".
+- Does not include client name (the project context covers that).
+- Does not start with the project type. Start with the verb.
+- Plain English. Role-specific technical terms preserved per `writers/plain-language.md`.
+
+Sub-task `assignee_id` (different from `parent_task_id`) is picked via the Job 6 decision tree on the developer pool. The PM owns the parent; the dev owns the child.
 
 ### Job 6 — Recommend the assignee
 
@@ -246,21 +267,13 @@ Write the assignee as `Name (Role) — short reason`. Examples:
 
 If the PM knows better and wants to assign outside the pod, their note will override (PM note always wins — existing rule).
 
-### Job 7 — Generate the proposed Orbit body (action-specific)
+### Job 7 — Generate the proposed Orbit body (Create subtask path only)
 
-The body content depends on which of the two paths the row took:
+The body content depends on the row's action:
 
-**Create subtask path (project bucket)** — pre-write the full 6-section task body per `schemas/orbit-dq-standard.md`. Plain language (4th–5th grade English) per `writers/plain-language.md` since the delivery team reads it. Keep role-specific technical terms. Strip corporate English. This is what lands in Orbit as the sub-task description when Mode 2 fires.
+**Create subtask path** — pre-write the full 6-section task body per `schemas/orbit-dq-standard.md`. Plain language (4th–5th grade English) per `writers/plain-language.md` since the delivery team reads it. Keep role-specific technical terms. Strip corporate English. The 6-section body lands in Orbit as the sub-task description when Mode 2 fires.
 
-**Reassign path (ad-hoc bucket)** — pre-write a short **Orbit reassignment comment** (NOT a full 6-section body). The comment goes on the existing task at reassignment time and tells the new assignee what changed. Format:
-
-```
-Reassigning to <new assignee first name>. Reason: <one-clause why the handover>. <Optional single sentence of context the assignee won't already see on the task>. Please continue from where the previous assignee left off and log your hours.
-```
-
-Plain language. Max 3 sentences. Cite a source link only when the context line references something the assignee can't see in Orbit (e.g., a Fathom moment or a client email thread).
-
-A reassignment row does NOT carry a `proposed_orbit_body` field. It carries a `proposed_orbit_reassign_comment` field instead. Mode 2 executor reads whichever field is present based on the row's action.
+**Flag path** — does NOT carry a `proposed_orbit_body`. No Orbit write happens for a Flag row. Job 7 is skipped for Flag rows entirely. The row's detail page substitutes `Proposed Orbit Task Body` with `PM next step` (rendered from the `pm_next_step` clause set in Job 5).
 
 ### Job 8 — Generate the proposed Slack handoff
 
@@ -298,7 +311,7 @@ For every signal (or grouped signal-set) the Output gating filter dropped, appen
 {
   "source": <orbit | gmail | slack | fathom>,
   "summary": <one-line description of what was dropped>,
-  "filter_reason": <one of: pm_coordination | wait_state | rollup | status_update_self_drive | comment_only_self_drive | client_email_pm_owns | am_ping_pm_owns | hours_overrun_alert | standup_recap | project_type_unknown | no_matching_open_task | no_pm_owned_parent_task>,
+  "filter_reason": <one of: pm_already_handled | hours_overrun_alert | pm_own_task_orbit_ui | rollup | standup_recap | third_party_automation | marketing_or_system_email | project_type_unknown>,
   "citations": [<source links — gmail thread URL, orbit task URL, fathom recording URL>]
 }
 ```

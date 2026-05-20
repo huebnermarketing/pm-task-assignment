@@ -77,11 +77,16 @@ Content order:
 
 Before iterating over the matcher's output array, scan it once and verify every item conforms to the 2-action rule from `synthesis/matcher.md` Output gating:
 
-- Every item's `recommended_action` must start with `Reassign task #` or `Create subtask under #`.
-- Every item must carry either `proposed_orbit_reassign_comment` (Reassign path) or `proposed_orbit_body` (Create subtask path), never both, never neither.
-- Items with `recommended_assignee = —` AND no `Uncertain:` AI Note are malformed — these are the legacy "PM coordination" rows that should have been filtered upstream.
+- Every item's `summary` must start with `Create subtask on` or `Flag `. No other openers.
+- `Create subtask` items MUST carry `parent_task_id`, `task_title`, `assignee_id`, and `proposed_orbit_body`. Missing any of these = malformed.
+- `Flag` items MUST carry `pm_next_step`. They MUST NOT carry `parent_task_id`, `task_title`, `assignee_id`, or `proposed_orbit_body`.
+- Items with `recommended_assignee = —` AND row action is `Create subtask` are malformed (subtask always has an assignee or an `Uncertain:` AI Note explaining why).
 
 Any item failing these checks is moved from the items array to the `filtered_signals` array with `filter_reason: writer_gating_caught_drift` before row creation. Log to Run Log. This is a safety net; the matcher should have already prevented these — but if it didn't, the writer catches the drift rather than polluting the queue.
+
+### Step 5.6 — Render the row-detail Action Block
+
+For each item that survives Step 5.5, the writer renders the row's detail page with the Action Block callout at the very top (per `schemas/row-detail-page.md`). The callout uses the structural emoji 🎯 (Create subtask) or 🚩 (Flag) — these are on the writer-emoji allowlist per `writers/plain-language.md`. The action callout appears BEFORE the H1 Summary. The PM should not have to scroll past Sources or Recommended Action to find the proposed task title and assignee — that information is in the top callout.
 
 ### Step 6 — Populate each row
 

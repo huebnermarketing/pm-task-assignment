@@ -6,15 +6,54 @@ Each row in the Morning Queue database opens to its own page. This file defines 
 
 **Primary content uses HEADINGS (always visible), not toggles.** The PM should be able to scroll the row page top-to-bottom and see everything important without clicking anything.
 
+**The top of the page is action-first, not narrative-first.** When the PM opens a row, the FIRST thing they see is what AI proposes to do (task title + assignee for Create subtask, or the PM-next-step for Flag). Sources and context move below. The PM should not have to scroll to find the actionable proposal.
+
 **ONE toggle appears at the very bottom** for the skill's working-memory reference context, clearly labeled so the PM knows they don't need to read it.
 
 ## Page structure (top to bottom)
 
+### Top callout — Action Block (ALWAYS first, NO heading above it)
+
+A single Notion `callout` block at the very top of the page. Content depends on the row's action:
+
+**Create subtask:**
+```
+🎯 Create subtask: <proposed task_title>
+Parent: <project short name> #<parent_task_id> (link)
+Assignee: <full name> (<role>)
+Why this assignee: <one-line reason from Job 6>
+```
+
+**Flag:**
+```
+🚩 Flag for PM: <one-line topic>
+PM next step: <pm_next_step clause from Job 5>
+No Orbit auto-execute on this row.
+```
+
+The 🎯 / 🚩 glyphs are part of the structural emoji allowlist for row callouts (see `writers/plain-language.md` emoji policy). They mark row type at a glance when the PM opens the page.
+
 ### H1: Summary
 
-Plain-language one-liner that matches the `Summary` column exactly. This is the PM's anchor — what they're looking at in one sentence.
+The narrative one-liner that matches the `Summary` column exactly. Below the action callout so the PM has already seen the actionable proposal.
 
 Then a short paragraph with additional context if the summary alone isn't enough. Normal English.
+
+### H1: Proposed Orbit Task Body (Create subtask rows ONLY)
+
+The full 6-section body that lands in Orbit when Mode 2 executes. Moved UP — sits before Sources so the PM sees the brief before context citations.
+
+Format per `schemas/orbit-dq-standard.md`, plain language per `writers/plain-language.md`.
+
+For Flag rows, this section is replaced by:
+
+### H1: PM Next Step (Flag rows ONLY)
+
+A short paragraph expanding the `pm_next_step` clause. What the PM should do, why, and any helper context (e.g., "Reply to Ellen on the Joe Warner thread; suggested devs given Joe framed the call as technical: <names from Orbit followers on #6994>"). Normal English.
+
+### H1: Proposed Slack Handoff (Create subtask rows ONLY)
+
+The Slack message body Mode 2 will draft and append to the row's Outcome. Plain language, audience = team dev. Flag rows skip this section.
 
 ### H1: Sources
 
@@ -66,47 +105,15 @@ Only appears when the skill opened and read a document for context.
 > **Summary of what was read:** [what the skill pulled from the document]
 > [Download](<url>)
 
-### H1: Recommended Action
+### H1: Recommended Action (context expansion)
 
-A short paragraph describing what the skill plans to do and why this specific choice.
+A short paragraph expanding on the action callout at the top of the page. Adds the WHY-this-choice reasoning so the PM understands the matcher's logic without re-deriving it. For Create subtask rows, this is where the assignee-pick reasoning (Job 6 branch trace) lives in narrative form.
 
-> Create a new Orbit task under `Agency X — Homepage Redesign` for the revision work. Assign to **Vijay Patel (FE)**. Send Slack handoff to Vijay with full context and the 12 revisions from the PDF. Slack Caitlin (AM) to let her know the task is assigned and will begin today.
+> Sub-task under `ECP AI Visibility Audit` parent task #110464 (currently assigned to you). Title: `Run AI Visibility audit on approved competitor list`. Assign to **Hitesh Asnani**.
 >
-> **Why Vijay:** Primary FE on Agency X, logged 24 hrs on current homepage task, has 12 hours available this week.
+> **Why Hitesh:** Already on the project (in followers); Ellen named him alongside you in the approval comment. SEO/AI audit specialist (Marketing/SEO Matrix). Branch (a) history-wins overrides the cross-matrix preference because prior involvement + AM mention is the decisive signal.
 
-### H1: Proposed Orbit Task Body
-
-The full 6-section task body that will land in Orbit when Mode 2 executes. Per `schemas/orbit-dq-standard.md`. **In plain language** per `writers/plain-language.md` — the assignee reads this. Header glyphs follow the PM's `orbit_task_header_style` preference (default `professional`).
-
-```
-**DO:** [what to do]
-**WHY:** [why it matters]
-**CONTEXT:** [project phase, what came before]
-**DONE WHEN:**
-  • [criterion 1]
-  • [criterion 2]
-  • [criterion 3]
-**SELF-QA:**
-  • [role-specific check 1]
-  • [role-specific check 2]
-  • [always] Left a completion comment
-**REFS:** [link1] | [link2] | [link3]
-```
-
-### H1: Proposed Slack Handoff
-
-The Slack message body the skill plans to produce when Mode 2 runs. Tagged with an audience: `Team`, `AM`, or `Client`.
-
-- For `Team` and `AM` audiences, the message is **never auto-sent**. After Mode 2 runs, the body is appended to this same row's Outcome under a `Slack draft (copy to send)` block. The PM copies it from Notion into Slack and sends it on their own.
-- A real Slack send happens only on three paths: (1) PM self-summary DM, (2) escalation backup ping (Mode 2 Step 3a), or (3) a `Team` handoff where the PM Note explicitly says "send".
-
-Body uses the per-PM `Slack handoff template` from Preferences and is in plain language per `writers/plain-language.md`.
-
-### H1: Proposed Email (if applicable)
-
-The email draft that will land in the PM's Gmail drafts folder. **In normal professional English** (the recipient is typically a client or AM).
-
-Full email: To, CC (if any), Subject, Body.
+(For Flag rows, this section names what is known about the signal and what the PM specifically needs to weigh.)
 
 ### H1: AI Notes (if any)
 

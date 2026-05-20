@@ -27,9 +27,9 @@ The database has **9 columns total**. The first 6 are visible in the default vie
 | Visible in default view | YES (column 1 — leftmost) |
 | Set by | Mode 1 (the matcher), via `synthesis/matcher.md` |
 | Editable by PM | Yes, but rare — the matcher writes a good summary, PM usually doesn't change it |
-| Default value | A one-line verb-first action sentence per `synthesis/matcher.md` Job 4. Starts with one of TWO locked verbs: `Reassign` or `Create subtask`. No other openers permitted. |
+| Default value | A one-line verb-first action sentence per `synthesis/matcher.md` Job 4. Starts with one of TWO locked verbs: `Create subtask` or `Flag`. No other openers permitted. For `Create subtask` rows, the proposed sub-task title appears inside the Summary so the PM reads it without opening the row detail page. |
 | Maximum length | Capped at 120 chars (the matcher enforces this — see Job 4 rules). |
-| Sample values | `Reassign Brother Plesk #109958 — patch ETA needs WP Maintenance ownership. To WP dev.` <br> `Create subtask under Solstice WP #8393 — swap Contact Form brochure PDF. To WP dev.` <br> `Create subtask under BoyarMiller Practice Area #103623 — draft Real Estate page outline. To Content.` |
+| Sample values | `Create subtask on ECP AI Visibility Audit #110464 — Run AI Visibility audit on approved competitor list. To Hitesh.` <br> `Create subtask on Solstice WP #106447 — Swap Contact Form brochure PDF. To Atul.` <br> `Flag 2010 Solutions — Ellen needs dev names for 27 May call. PM action.` <br> `Flag Conversant FTP — credentials still missing, blocking dev work today. PM action.` |
 
 ### Column 2 — `Status`
 
@@ -70,9 +70,9 @@ Recommended Action ─► Approved (by PM)         ─► Done (by Mode 2)
 | Visible in default view | YES (column 3) |
 | Set by | Mode 1 (the matcher) |
 | Editable by PM | Yes, but rare — PM usually drops a note in `PM Notes` instead of editing this column |
-| Default value | A short phrase describing one of the two locked actions (Reassign / Create subtask) plus the team handoff. Per `synthesis/matcher.md` Job 5 the action set is closed to these two. |
+| Default value | A short phrase describing one of the two locked actions (`Create subtask` or `Flag`) plus what Mode 2 will do. Per `synthesis/matcher.md` Job 5 the action set is closed to these two. |
 | Maximum length | Recommend under 100 chars for scannability |
-| Sample values | `Reassign task #109958 to Atul (WP) + Slack handoff` <br> `Create subtask under #8393 with brief, assign to Atul (WP) + Slack handoff` <br> `Reassign task #15949 to Hitesh (BE) + Slack handoff` |
+| Sample values | `Create subtask under #110464, assign to Hitesh (SEO/AI) + Slack handoff` <br> `Create subtask under #106447, assign to Atul (WP) + Slack handoff` <br> `Flag — PM owns next step (reply to Ellen). No Mode 2 action.` |
 
 ### Column 4 — `Recommended Assignee`
 
@@ -239,47 +239,47 @@ When the schema needs to evolve (e.g., adding a column in a future version), use
 
 ---
 
-## Sample row — Create subtask under PM's parent task (project bucket)
+## Sample row — Create subtask (project work)
 
 | Column | Value |
 |---|---|
-| Summary | `Create subtask under Solstice WP #106447 — swap Contact Form brochure PDF. To WP dev.` |
+| Summary | `Create subtask on ECP AI Visibility Audit #110464 — Run AI Visibility audit on approved competitor list. To Hitesh.` |
 | Status | `Approved` |
-| Recommended Action | `Create subtask under PM-owned parent #106447 with brief, assign to Atul (WP) + Slack handoff` |
-| Recommended Assignee | `Atul Mehra (WP) — WordPress in Matrix A, prior task on Solstice (3 last 3mo)` |
+| Recommended Action | `Create subtask under #110464, assign to Hitesh (SEO/AI) + Slack handoff` |
+| Recommended Assignee | `Hitesh Asnani (SEO/AI) — Marketing/SEO Matrix, in followers, Ellen named him in approval comment` |
 | PM Notes | *(empty — PM accepted the recommendation)* |
-| Outcome | `Subtask #110890 created under parent #106447 (assigned to Abhishek). Slack handoff drafted (copy from row page).` |
-| Project | `Solstice WordPress Website (#8393)` |
-| Source Systems | `Gmail` |
-| AI Notes | `Parent picked: #106447 (Reference) — only PM-owned task open on this project.` |
+| Outcome | `Subtask #110890 created under parent #110464 (assigned to Abhishek). Slack handoff drafted (copy from row page).` |
+| Project | `ECP AI Visibility Audit (#8545)` |
+| Source Systems | `Gmail, Orbit` |
+| AI Notes | `Parent picked: #110464 (Signed SOW) — only PM-owned task open on this project.` |
 
-## Sample row — Reassign (reassign bucket: Ad-hoc / Maintenance only)
+## Sample row — Create subtask (Ad-hoc / Maintenance work, also Create subtask now)
 
 | Column | Value |
 |---|---|
-| Summary | `Reassign Brother Plesk #109958 — patch ETA needs WP Maintenance ownership. To WP dev.` |
+| Summary | `Create subtask on Brother Plesk #109958 — Investigate patch ETA with WP Maintenance. To Atul.` |
 | Status | `Approved` |
-| Recommended Action | `Reassign task #109958 to Atul (WP) + Slack handoff` |
+| Recommended Action | `Create subtask under #109958, assign to Atul (WP) + Slack handoff` |
 | Recommended Assignee | `Atul Mehra (WP) — WP Maintenance lead, 2 prior tasks on Brother last 3mo` |
 | PM Notes | *(empty)* |
-| Outcome | `Reassigned task #109958 → Atul. Slack handoff drafted (copy from row page).` |
+| Outcome | `Subtask #110918 created under parent #109958. Slack handoff drafted (copy from row page).` |
 | Project | `Brother Site Issues (#8461) — Maintenance` |
 | Source Systems | `Orbit, Fathom` |
-| AI Notes | *(empty)* |
+| AI Notes | `Maintenance project type — previously this would have been a Reassign row; new rule unifies on Create subtask under the PM-owned parent.` |
 
-## Sample row — Uncertain which task to reassign (reassign bucket)
+## Sample row — Flag (PM action needed)
 
 | Column | Value |
 |---|---|
-| Summary | `Reassign Process Barron #15949 — backend hours-overrun handoff. To BE dev.` |
+| Summary | `Flag 2010 Solutions — Ellen needs dev names for 27 May call. PM action.` |
 | Status | `Recommended Action` |
-| Recommended Action | `Reassign + Slack handoff (assignee not picked — see AI Notes)` |
-| Recommended Assignee | `—` |
+| Recommended Action | `Flag — PM owns next step (reply to Ellen). No Mode 2 action.` |
+| Recommended Assignee | `— (PM action)` |
 | PM Notes | *(empty)* |
-| Outcome | *(empty — Mode 2 skips because no assignee picked)* |
-| Project | `Process Barron New WP Website (#15949)` |
-| Source Systems | `Orbit, Gmail` |
-| AI Notes | `Uncertain: signal could apply to task #15949 (Backend Functionality) or task #15952 (Map Functionality - Script). Both overran hours yesterday. Please pick which to reassign.` |
+| Outcome | *(empty — Mode 2 does not execute Flag rows. PM marks Skip when resolved.)* |
+| Project | `2010 Solutions FTE Works (#6994)` |
+| Source Systems | `Gmail` |
+| AI Notes | `PM-action detection: no PM-sent reply on the thread between signal arrival 2026-05-15 21:00 IST and Mode 1 fire. Flag emitted.` |
 
 ---
 

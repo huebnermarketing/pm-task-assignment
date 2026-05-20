@@ -63,10 +63,18 @@ Notion read-only exception: Notion access is normally restricted to NOTION_PAREN
 Mental model for this run — read before doing anything else:
 
 The Morning Queue is **NOT a daily digest**. It is the input to two specific AI actions and only two:
-(1) Reassign an existing dev-owned Orbit task to a different developer — applies to projects whose `project_type` is `Ad-hoc` or `Maintenance` ONLY.
-(2) Create a new sub-task with the 6-section brief under a parent task currently assigned to the running PM — applies to every other project type.
+(1) **Create subtask** — universal across every project type (including Ad-hoc and Maintenance). Net-new scoped work landing under a parent task currently assigned to the running PM. Carries explicit task title + 6-section brief.
+(2) **Flag** — overnight signal that needs PM attention but cannot be auto-delegated (PM owns the next move). No Orbit execution; the row sits as a PM-readable item.
 
-Everything else the overnight signals contain — FYI items, PM coordination, AM/client email drafts, status-review batches, hours-overrun alerts, the PM's own tasks due today, rollup digests, standup recaps — is **NOT a queue row**. Those signals are recorded in the Run Log's `Filtered signals` toggle and never become rows. The matcher MUST NOT invent FYI / PM-action rows to fill space. An empty queue is a correct outcome and a valid run; the summary line "0 items for your morning. 0 reassignments, 0 new sub-tasks. <N signals filtered — see Run Log if you want to audit>." is healthy output. Do NOT lower the action bar to produce a non-zero row count. Per SKILL.md non-negotiable rules #18–#19 and `synthesis/matcher.md` Output gating + Job 11.
+Apply two filters before deciding action:
+
+A. **PM-action detection.** For every signal, check whether the PM already acted on it between signal arrival and Mode 1 fire (PM-sent email on the same thread, PM-authored Orbit comment on the same task, PM-sent Slack on the same channel). If PM-action exists, the signal drops with `filter_reason: pm_already_handled`. Do NOT re-surface signals the PM has already resolved.
+
+B. **Static drop list.** Hours-overrun alerts, PM's own tasks already visible in Orbit's due-date UI, rollup digests, third-party automation emails, marketing/system noise — all drop. Per SKILL.md non-negotiable rules #18–#20 and `synthesis/matcher.md` Output gating.
+
+An empty queue is a correct outcome. The matcher MUST NOT invent rows to fill space. Summary line "0 items for your morning. 0 sub-tasks, 0 flags. <N signals filtered — see Run Log>." is healthy output. Do NOT lower the action bar.
+
+Row detail page is action-first: the top of every row's detail page is a callout with the proposed task title + assignee (Create subtask) or the PM next step (Flag). Sources move below. Per SKILL.md non-negotiable #21 and `schemas/row-detail-page.md`.
 
 Mandatory Orbit collector tool sequence per `collectors/orbit.md`: `get_activity_log` and `list_task_comments` are non-skippable on every run. `get_user_workload` is NOT a substitute and is reserved for `synthesis/pod-inference.md`'s no-history fallback path only. The Mode 1 Step 3.5 assertion will abort the run if `get_activity_log` was not invoked.
 
