@@ -70,8 +70,9 @@ Content order:
 
 4. **Inline Morning Queue database**
    - Create via `notion-create-database` with the parent as this dated page.
-   - Schema per `schemas/morning-queue-database.md` — 6 main columns visible: Summary, Status, Recommended Action, Recommended Assignee, PM Notes, Outcome.
-   - Additional properties (Project, Source Systems, AI Notes) exist in the schema but are hidden from the default view (they appear only when a row is opened).
+   - Schema per `schemas/morning-queue-database.md` — 10 columns, all visible in the default view, in order: Summary, AI Notes, Orbit Task Link, Project, Recommended Action, Recommended Assignee, Outcome, PM Notes, Source Systems, Status.
+   - `Orbit Task Link` is Notion's native URL property — single clickable URL per row. For `Create subtask` rows it holds the parent task's Orbit URL; for `Flag` rows it holds the bound Orbit task URL, or `—` / empty when no Orbit task is bound (e.g., Gmail-only flag). The sub-task URL that Mode 2 creates is written into `Outcome` only — never into `Orbit Task Link` (which keeps the parent reference stable through the row's lifetime).
+   - `Project` format is `<Project Name> (#<orbit_project_id>)` — matcher supplies both name and Orbit project code. Maintenance / Ad-hoc style projects append a type suffix (`— Maintenance`).
 
 ### Step 5.5 — Enforce output gating (defense in depth)
 
@@ -92,16 +93,17 @@ For each item that survives Step 5.5, the writer renders the row's detail page w
 
 For each item in the matcher's output array (after Step 5.5 gating):
 
-1. Create a row in the database with:
-   - `Summary` (title)
-   - `Status` = `Recommended Action` (default)
+1. Create a row in the database with (in schema DDL order — Summary, AI Notes, Orbit Task Link, Project, Recommended Action, Recommended Assignee, Outcome, PM Notes, Source Systems, Status):
+   - `Summary` (title) — matcher's verb-first one-liner
+   - `AI Notes` — any uncertainty flags, split reasoning, or matcher Job 6 delegate reasoning; for priority-lane rows always populated with `<AM> put this on your plate overnight, due today. Proposed delegate: <name> (<reason>).`; empty otherwise
+   - `Orbit Task Link` (URL property) — parent task URL for `Create subtask` rows; bound task URL for `Flag` rows that have one; `—` or empty for Flag rows with no Orbit task
+   - `Project` — `<name> (#<orbit_project_id>)` or `Standalone`
    - `Recommended Action` — short phrase
-   - `Recommended Assignee` — name + role + short reason
+   - `Recommended Assignee` — name + role + short reason; `—` for advisory items
+   - `Outcome` — empty (filled by Mode 2; Mode 2 writes the new sub-task URL here, NOT into Orbit Task Link)
    - `PM Notes` — empty
-   - `Project` — the matched project name
    - `Source Systems` — multi-select of which collectors contributed (Orbit, Gmail, Fathom)
-   - `AI Notes` — any uncertainty flags or split reasoning; empty if none
-   - `Outcome` — empty (filled by Mode 2)
+   - `Status` = `Recommended Action` (default)
 
 2. Populate the row's page content per `schemas/row-detail-page.md`:
    - `Summary` heading + the matcher's summary

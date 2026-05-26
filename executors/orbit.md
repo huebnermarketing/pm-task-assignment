@@ -164,3 +164,4 @@ Multiple operations combine with periods: `Subtask #110890 created under parent 
 - Does not delete tasks, projects, or comments.
 - Does not bulk-update.
 - Does not touch V3-related pages or projects (see `references/v3-context.md`).
+- **Does not modify the `Orbit Task Link` column on the Morning Queue row.** That column is the matcher-frozen parent task URL, written once at Mode 1 row-create time. The newly-created sub-task URL goes into the `Outcome` column only (per the Outcome format above), preserving the parent reference for audit.

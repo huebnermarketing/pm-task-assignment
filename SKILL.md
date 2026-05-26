@@ -206,7 +206,7 @@ Everything below this file provides the detailed behavior. Load the specific fil
 - `writers/source-citation.md` — citation formats.
 - `schemas/parent-page.md` — parent Notion page structure: header callout + Year/Month heading-toggle blocks on parent body containing dated sub-page links + Run Log + Incidents + Preferences last. Day pages stay as sub-pages (Notion-tree parent = parent page); Year/Month are toggle blocks, not sub-pages.
 - `schemas/preferences-page.md` — Preferences layout. AM identities (canonical email + aliases) drive the Mode 1 Step 3a priority pass.
-- `schemas/morning-queue-database.md` — inline database schema (9 columns, 4 Status options, 3 Source Systems options).
+- `schemas/morning-queue-database.md` — inline database schema (10 columns all visible: Summary, AI Notes, Orbit Task Link, Project, Recommended Action, Recommended Assignee, Outcome, PM Notes, Source Systems, Status; 4 Status options, 3 Source Systems options).
 - `schemas/row-detail-page.md` — row detail page layout (headings + reference toggle at bottom).
 - `schemas/orbit-dq-standard.md` — 6-section Orbit task body template.
 - `references/due-date-categories.md` — PM note → category ID mapping.

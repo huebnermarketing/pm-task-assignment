@@ -197,6 +197,8 @@ Structure:
     {
       "id": <int>,
       "title": <string>,
+      "url": <string>,
+      "project_type": <string — "Fixed Cost" | "SaaS" | "PPC" | "Hosting" | "Hourly" | "Repeat" | "Ad-hoc" | "Maintenance" | ...>,
       "client_name": <string>,
       "sub_client_name": <string or null>,
       "project_owner_name": <string>,
@@ -206,11 +208,30 @@ Structure:
       "followers": [{"id": <int>, "name": <string>}, ...],
       "recent_task_assignees": [{"id": <int>, "name": <string>, "task_count": <int>}, ...],
       "department_usage": [{"department_name": <string>, "hours_used": <string>}, ...],
-      "client_contacts": [{"name": <string>, "email": <string>}, ...]
+      "client_contacts": [{"name": <string>, "email": <string>}, ...],
+      "tasks": [
+        {
+          "id": <int>,
+          "title": <string>,
+          "url": <string — Orbit task URL>,
+          "assignee_id": <int or null>,
+          "assignee_name": <string or null>,
+          "parent_task_id": <int or null — null for top-level parents, set for sub-tasks>,
+          "status": <string>,
+          "due_date": <ISO date or null>,
+          "is_pm_owned": <bool — assignee_id == PM_user_id at collection time>
+        }
+      ]
     }
   ]
 }
 ```
+
+The `tasks` array is populated from the `get_project_task_list` call the collector already makes per project (one call per project in the universe) — no new MCP call. It serves three downstream needs:
+
+1. `synthesis/matcher.md` Job 5 — finding the PM-owned parent task to nest a sub-task under (filter `is_pm_owned == true`).
+2. `synthesis/matcher.md` — composing the row's `orbit_task_link` column by looking up the parent task's `url` by `parent_task_id` when the signal itself doesn't carry the parent URL.
+3. `synthesis/pod-inference.md` — computing `has_history_on_project` for candidate assignees via task-count rollups.
 
 This map is used by `synthesis/matcher.md` to take a signal from Gmail (e.g., "email from jane@agencyx.com") and figure out it's about project 8426 because Agency X is the client for that project and Jane is a client contact.
 

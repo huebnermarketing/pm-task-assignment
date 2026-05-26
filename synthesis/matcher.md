@@ -69,10 +69,12 @@ This rule directly fixes the over-flagging observed in early runs. The PM action
 A list of items. Each item becomes one row in the Morning Queue database. For each item, the matcher sets:
 
 - `summary` — one-line plain-English summary the PM reads (in normal professional English, not simplified)
-- `project` — the Orbit project name (best match)
+- `project` — render-ready string for the Notion `Project` column: `<Orbit project name> (#<orbit_project_id>)`, plus `— Maintenance` / `— Ad-hoc` suffix when the project type warrants. `Standalone` when no project resolves.
+- `project_name` and `orbit_project_id` — separate raw fields preserved alongside `project` for downstream consumers (writers, executors) that need them split
+- `orbit_task_link` — render-ready URL for the Notion `Orbit Task Link` column. For `Create subtask` rows: the Orbit URL of the pinned `parent_task_id` (priority lane) OR the inferred PM-owned parent task. For `Flag` rows: the Orbit URL of the bound task if the flag is anchored to one; `—` (em-dash, written as plain text into the URL field, or left empty) when no Orbit task is bound (e.g., a Gmail-only flag for PM action). The sub-task that Mode 2 may create is NOT placed here — it goes into `outcome` only.
 - `recommended_action` — short phrase, e.g., "Create task + handoff to Vijay"
 - `recommended_assignee` — name + short reason
-- `ai_notes` — anything unusual, uncertainty flags, split reasoning
+- `ai_notes` — anything unusual, uncertainty flags, split reasoning. Priority-lane rows always carry the `<AM> put this on your plate overnight, due today. Proposed delegate: <name> (<reason>).` line here.
 - `source_signals` — the set of collector signals that contributed to this item
 - `proposed_orbit_body` — 6-section task body (from `schemas/orbit-dq-standard.md`), in plain language (per `writers/plain-language.md`) — used by the Orbit Executor if approved
 - `proposed_handoff` — plain-language message for the assignee, copied + sent by PM through whatever channel they use for that team member
@@ -221,6 +223,19 @@ The `task_title` is the actual string Orbit will use as the sub-task name AND it
 - Plain English. Role-specific technical terms preserved per `writers/plain-language.md`.
 
 Sub-task `assignee_id` (different from `parent_task_id`) is picked via the Job 6 decision tree on the developer pool. The PM owns the parent; the dev owns the child.
+
+#### Compose `orbit_task_link` and `project` for the row
+
+After `parent_task_id` is resolved (priority-lane pin OR PM-owned parent inference), build the two render-ready fields the writer consumes for the Notion queue columns:
+
+- **`orbit_task_link`** — the Orbit URL of the parent task. Pull from the source signal:
+  - Priority-lane signal → `signal.parent_task_url` (Orbit collector Priority Pass already emits this).
+  - Normal `Create subtask` signal → look up the PM-owned parent task's URL from the Orbit collector's relationship map (every task carries a `task_url`); when the parent was inferred (not directly on a signal), match by `parent_task_id` against the relationship map's task index.
+  - **`Flag` rows**: if the flag is anchored to a specific Orbit task (e.g., `signal.task_id` present, no PM-action on the task), set `orbit_task_link = signal.task_url`. If the flag has no underlying Orbit task (Gmail-only signal, no project task created yet), set `orbit_task_link = "—"` (em-dash literal). Never null — writer expects the field.
+  - **Null `task_url` on a signal**: cross-check the Orbit collector's relationship map (every task in the universe is indexed by `task_id` with its URL). If the URL is still missing there, set `orbit_task_link = "—"` and append an AI Note: `Orbit task URL not surfaced by MCP on this signal — open via task ID #<id>.` Do not block the row.
+- **`project`** — render-ready string for the Notion `Project` column. Format: `<project_title> (#<project_id>)`. For Maintenance / Ad-hoc projects, append `— Maintenance` / `— Ad-hoc` (read project_type from the Orbit relationship map). For rows with no resolved Orbit project (Gmail-only flag with no project mapping), emit `Standalone`. Preserve the raw `project_name` and `orbit_project_id` separately for downstream consumers.
+
+No Mode 2 step writes into `orbit_task_link` later — the column is frozen at row-create time and stays as the parent reference. Sub-task URLs (created by Mode 2) go into `Outcome` only, per `executors/orbit.md` Outcome format.
 
 ### Job 6 — Recommend the assignee
 
