@@ -39,11 +39,10 @@ Block type: single text property labelled `Execution run time (IST)`.
 
 ### Field 4 — Escalation backup
 
-Block type: a `Backup` toggle block containing four inline properties.
+Block type: a `Backup` toggle block containing three inline properties (channel is fixed to email — Slack option was removed).
 
 - `Backup name` — placeholder `[Backup Full Name]`. Example: `Hiten Upadhyay`. Valid: any non-empty name that is **not** the PM's own name from Field 1. Missing: blank, or matches the PM's own name (preflight rejects self-as-backup).
-- `Backup channel` — placeholder `Slack`. Valid: one of `Slack`, `Email`. Missing: blank or any other value.
-- `Backup handle/email` — placeholder `@[backup-handle]` (Slack) or `backup@whitelabeliq.com` (email). Example: `@hiten` (Slack) or `hitenu@whitelabeliq.com` (email). Valid: matches the channel above. Missing: blank, or doesn't match channel format.
+- `Backup email` — placeholder `backup@whitelabeliq.com`. Example: `hitenu@whitelabeliq.com`. Valid: any `@whitelabeliq.com` address. Missing: blank, or non-WLIQ domain.
 - `Ping time (IST)` — placeholder `11:00 IST`. Valid: 24-hour `HH:MM IST`, **at or after** the execution run time. Missing: blank, wrong format, or earlier than execution time.
 
 ### Field 5 — Account managers
@@ -51,11 +50,11 @@ Block type: a `Backup` toggle block containing four inline properties.
 Block type: a Notion database labelled `Account Managers` embedded on the page. One row per AM. Columns:
 
 - `AM name` — placeholder `[AM Full Name]`. Example: `Caitlin Sims`. Valid: non-empty.
-- `AM email` — placeholder `am@whitelabeliq.com`. Example: `caitlin@whitelabeliq.com`. Valid: any email.
-- `AM Slack handle` — placeholder `@[am-handle]`. Example: `@caitlin`. Valid: starts with `@`.
-- `Channel preference` — placeholder `Slack for handoffs, email for paper trail`. Valid: free text describing routing rule.
+- `AM canonical email` — placeholder `am@whitelabeliq.com`. Example: `caitlin@whitelabeliq.com`. Valid: any `@whitelabeliq.com` address. **Load-bearing for the Mode 1 Step 3a priority pass** — the skill resolves AM identities to Orbit user_ids via this email, then surfaces parent tasks the AM created or reassigned to the PM overnight.
+- `AM email aliases` — placeholder `[alias@whitelabeliq.com]` (optional, one per line). Aliases are also matched during the priority-pass identity resolution.
+- `AM Slack handle` — placeholder `@[am-handle]`. Example: `@caitlin`. Valid: starts with `@`. Used by `executors/slack.md` for AM-ping send when the PM leaves an explicit `send` note + audience=am on a row. If blank, AM-ping send falls back to Notion draft for the PM to copy.
 
-Missing: zero rows. If the PM truly has no AMs, they enter a single row with `AM name = NONE` — preflight will accept this and the skill will skip AM-bound drafts until the row is replaced.
+Missing: zero rows. If the PM truly has no AMs, they enter a single row with `AM name = NONE` — preflight will accept this and the skill will skip AM-bound drafts AND the Mode 1 Step 3a priority pass (no AMs to match against) until the row is replaced.
 
 ### Field 6 — Default email preferences
 
@@ -64,11 +63,11 @@ Block type: a `Email Defaults` toggle block with two inline properties.
 - `Default CC rules` — placeholder `CC the relevant AM on every client email; CC [leadership] on every leadership email`. Example: `CC the relevant AM on every client email; CC Nishant on every leadership email`. Valid: free text, at least 5 characters. Missing: blank.
 - `Email signature` — placeholder `Best,\n[PM First Name]`. Example: `Best,\nAditi`. Valid: free text, at least 3 characters. Missing: blank.
 
-### Field 7 — Default Slack tone for team handoffs
+### Field 7 — Default handoff tone for team handoffs
 
-Block type: a `Slack Tone` toggle block with one property.
+Block type: a `Handoff Tone` toggle block with one property.
 
-- `Default Slack tone` — placeholder `[describe your team handoff tone]`. Example: `Direct and warm — short sentences, simple words, friendly. Always remind assignees to log hours.` Valid: free text, at least 20 characters. Missing: blank or under 20 chars.
+- `Default handoff tone` — placeholder `[describe your team handoff tone]`. Example: `Direct and warm — short sentences, simple words, friendly. Always remind assignees to log hours.` Valid: free text, at least 20 characters. Missing: blank or under 20 chars. Applies to every handoff draft rendered on the row's detail page, regardless of whether the PM ultimately copies the draft into chat, email, or sends via Slack (with the explicit `send` note).
 
 ### Field 8 — Always-include rules
 
@@ -84,7 +83,7 @@ Block type: a `Always-include rules` toggle block containing a bulleted list.
 
 Block type: a `Tone Samples` toggle block with 3-5 child callouts, each containing a verbatim Slack/email paste.
 
-- Placeholder for each sample callout: a date label (example: `Sample 1 — Slack to [team member], 20 April 2026`) followed by the verbatim message body.
+- Placeholder for each sample callout: a date label (example: `Sample 1 — Handoff to [team member], 20 April 2026`) followed by the verbatim message body.
 - Valid: 3-5 callouts, each with at least 30 characters of body text.
 - Missing: this field is **optional**. Empty is allowed; preflight notes "tone samples skipped — using generic professional tone" and proceeds.
 
@@ -95,10 +94,10 @@ At the very TOP of the Preferences page, the template includes a single Notion c
 - [ ] Identity (name, Orbit ID, canonical email)
 - [ ] Morning run time (IST)
 - [ ] Execution run time (IST)
-- [ ] Escalation backup (name, channel, handle, ping time)
+- [ ] Escalation backup (name, email, ping time)
 - [ ] Account managers (at least one row, even if NONE)
 - [ ] Default email preferences (CC rules + signature)
-- [ ] Default Slack tone
+- [ ] Default handoff tone
 - [ ] Always-include rules (or explicitly left empty)
 - [ ] Tone samples (or explicitly left empty — optional)
 
@@ -143,7 +142,7 @@ If the PM edits a required field to an invalid value, the next preflight aborts 
 
 ## Tone samples
 
-The PM pastes tone samples directly into the `Tone Samples` toggle block on the Preferences page — one callout per sample, with a date label. There is no `update tone samples` chat command. To add or replace samples, edit the toggle block in Notion; the next routine fire reads the updated samples.
+The PM pastes tone samples directly into the `Tone Samples` toggle block on the Preferences page — one callout per sample, with a date label (`Handoff to [team member], DD Month YYYY` / `Email to [AM], DD Month YYYY` / etc.). There is no `update tone samples` chat command. To add or replace samples, edit the toggle block in Notion; the next routine fire reads the updated samples.
 
 ## Reference
 

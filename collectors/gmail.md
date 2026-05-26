@@ -1,12 +1,14 @@
 # Gmail Collector
 
-> **This collector uses ONLY the Gmail MCP. Source allowlist — primary collection: Orbit, Gmail, Slack, Fathom, Notion. Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). Nothing else, ever.**
+> **This collector uses ONLY the Gmail MCP. Source allowlist — primary collection: Orbit, Gmail, Fathom, Notion (Slack forbidden). Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). Nothing else, ever.**
 
 > **Preflight (`preflight.md`) must have run before this collector is invoked.**
 
 ## Purpose
 
 Pull overnight email signals from the PM's WLIQ Gmail account that need their attention. Return a structured list of email items ready for `synthesis/matcher.md`.
+
+**Dual role.** Gmail signals are NOT only standalone new-requirement signals. They also serve as **context enrichment** for Orbit signals — especially priority-lane signals from the Orbit collector's Priority Pass. A Gmail thread between the AM and the PM about the same project may not be a new actionable item on its own (no fresh ask, no new deliverable), but it IS the backstory the PM needs to brief the delegate. To support this, every Gmail signal carries cross-link metadata that `synthesis/matcher.md` Job 4b uses to attach it to corroborating Orbit signals. See `## Context-link metadata` below.
 
 ## Scope — single account only
 
@@ -46,7 +48,7 @@ Run targeted searches — not a full inbox dump. All searches scoped to the WLIQ
 
 - **Orbit notification emails** — already covered by the Orbit collector. Detect via sender domain matching Orbit's notification-from address.
 - **Newsletters and marketing emails** — detect via `list-unsubscribe:` header, `noreply@` senders, well-known marketing domains.
-- **Automated tool notifications** — GitHub, CI/CD alerts, Slack digests, calendar notifications.
+- **Automated tool notifications** — GitHub, CI/CD alerts, third-party chat digests, calendar notifications.
 - **Internal WLIQ blasts** that aren't addressed to the PM directly.
 - **Messages from the PM's other authenticated accounts** (personal Gmail, etc.) — out of scope per the single-account rule.
 
@@ -101,9 +103,26 @@ Use the Orbit relationship map (from the Orbit collector) to classify each sende
     "label": "Email from <sender.name>, <date>, subject: <subject>",
     "url": <thread_url>,
     "thread_id": <thread_id>
+  },
+  "context_link": {
+    "project_id_candidates": [<int>, ...],
+    "actor_emails": [<string>, ...],
+    "topic_keywords": [<string>, ...],
+    "timestamp": <ISO datetime>
   }
 }
 ```
+
+## Context-link metadata
+
+Every Gmail signal carries a `context_link` object so `synthesis/matcher.md` Job 4b can attach it to corroborating Orbit signals (especially priority-lane). Population rules:
+
+- **`project_id_candidates`** — list of Orbit project IDs the thread plausibly refers to. Resolution order: (1) the project's full name appearing as a substring of the thread subject or body, (2) any sender or recipient email matching an Orbit `client_contacts` entry — emit that project's id, (3) attachment filename matching a substring of an Orbit project title. Multiple candidates are allowed; the matcher will narrow against Orbit signals. Empty list is allowed.
+- **`actor_emails`** — every unique email address appearing in the thread's From, To, CC (excluding the PM's canonical + aliases). Used by Job 4b to detect AM threads relevant to the priority lane.
+- **`topic_keywords`** — short list (≤ 8 entries) of significant nouns + project-specific terms extracted from the subject line + first message body. Use simple stopword filtering; no embeddings. Lowercase, deduplicated.
+- **`timestamp`** — ISO datetime of the latest message in the thread. Used for Job 4b's ±24h time-proximity rule when matching against Orbit events.
+
+The collector populates `context_link` on EVERY Gmail signal regardless of whether the matcher actually links it later. This is cheap — the data is already extracted during normal collection.
 
 ## Full thread context
 

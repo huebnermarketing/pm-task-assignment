@@ -35,7 +35,6 @@ Heading: `Sources`. One bullet per collector, format `[name]: [count] signals, [
 ```
 - Orbit: 12 signals, OK
 - Gmail: 4 signals, OK
-- Slack: 2 signals, OK
 - Fathom: 0 signals, OK
 ```
 
@@ -102,7 +101,7 @@ Two links, one bullet each:
 
 - **One line per decision.** No paragraphs. No multi-sentence reasons.
 - **Reasons are 5–15 words.** Concrete, evidence-anchored. Good: `role-fit WP-dev, only WP-dev in pod`. Bad: `best fit`, `seemed appropriate`, `matched preferences`.
-- **No full signal text.** No email bodies, no Slack message bodies, no Fathom transcripts.
+- **No full signal text.** No email bodies, no Fathom transcripts.
 - **No tool-call dumps.** No JSON payloads, no MCP request/response.
 - **Privacy:** subjects may mention project names + internal assignee names (already on the parent page). Do not include client PII (client emails, phone numbers, contract details) beyond what is already publicly on the parent.
 - If the writer receives a multi-paragraph reason from a calling mode, **truncate to 15 words and append `…`** (the writer enforces this — see `writers/run-log.md`).
@@ -119,18 +118,16 @@ Two links, one bullet each:
 Sources
 - Orbit: 12 signals, OK
 - Gmail: 4 signals, OK
-- Slack: 2 signals, OK
 - Fathom: 0 signals, OK
 
 Decisions
 - Item 1 — Acme WP redesign, due Fri → assign-task → role-fit WP-dev, only WP-dev free in pod
 - Item 2 — Beta SaaS bug overdue 2d → nudge-PM → owner Priya, severity high, no comment 2d
 - Item 3 — Gamma renewal email from client → draft-reply → renewal Q asked, template-match exists
-- Item 4 — Delta hosting alert from Slack → ack-and-route → ops-pod owns, standard escalation
+- Item 4 — Delta hosting alert from Orbit comment → ack-and-route → ops-pod owns, standard escalation
 
 Skipped
 - Gmail: newsletter from Atlassian → skipped → marketing, no project tag, sender on ignore-list
-- Slack: birthday thread #general → skipped → social, no task signal
 - Orbit: closed task comment "thanks!" → skipped → courtesy comment, no action implied
 
 Uncertain

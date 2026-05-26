@@ -107,7 +107,7 @@ The header is the only static, persistent block at the very top of the parent bo
   | ------------------- | -------------------------- | ------------------------------------------------------------------------------------------- |
   | `Timestamp`         | Date (with time)           | When the incident occurred (ISO 8601, Asia/Kolkata IST with `+05:30` offset).               |
   | `Mode`              | Select                     | One of: `Mode 1`, `Mode 2`, `Monthly Archival`.                                             |
-  | `MCP`               | Select                     | One of: `Orbit`, `Gmail`, `Slack`, `Fathom`, `Notion`.                                      |
+  | `MCP`               | Select                     | One of: `Orbit`, `Gmail`, `Fathom`, `Notion`.                                               |
   | `Step`              | Text                       | Which step in the mode failed (free text, e.g., "fetch overdue tasks").                     |
   | `Error`             | Text                       | The error message captured from the connector.                                              |
   | `Retry on next fire`| Checkbox                   | If checked, the next fire of the same mode will retry the failed step before normal flow.   |
@@ -117,7 +117,7 @@ The header is the only static, persistent block at the very top of the parent bo
 - **Sort:** by `Timestamp` descending (most recent incident first).
 - **Lifecycle:** created on first preflight if missing (per `preflight.md` Step 6), OR on first incident if it doesn't exist yet (the connector-failure path in `connector-failure-notify.md` Tier 4 will create-or-append).
 - **Read on every fire:** preflight loads unresolved incidents and surfaces them in the new run-log entry's "Pre-existing unresolved incidents" field, so each fire is aware of standing failures.
-- **Escalation:** 3+ consecutive unresolved incidents on the same `MCP` trigger a Slack escalation to the backup person — already documented in `connector-failure-notify.md`.
+- **Escalation:** 3+ consecutive unresolved incidents on the same `MCP` trigger an email escalation to the backup person — already documented in `connector-failure-notify.md`.
 
 ### 4. Preferences sub-page — always last
 

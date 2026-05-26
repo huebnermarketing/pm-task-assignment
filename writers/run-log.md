@@ -127,10 +127,12 @@ These are dumb truncations, not summarization. The mode is responsible for passi
 If Step 4 or Step 5 fails (Notion API error, network outage, schema drift):
 
 1. Retry once after a 5-second wait.
-2. If still failing, **fall back to Slack DM**. Use the Slack MCP to DM the PM (their Slack ID from Preferences / parent config) with:
+2. If still failing, **fall back to sent email**. Use the Gmail MCP to send the PM an email (their canonical email from Preferences) with:
 
    ```
-   [PM Task Assignment] Run Log write FAILED for <Run ID>
+   Subject: [PM Task Assignment] Run Log write FAILED for <Run ID>
+
+   Body:
    Mode: <mode>
    Status: <status>
    Started: <started> IST
@@ -149,9 +151,9 @@ If Step 4 or Step 5 fails (Notion API error, network outage, schema drift):
    Notion error: <error one-liner>
    ```
 
-   Send the body inside a Slack code block so it stays monospace and unwrapped.
+   Wrap the body inside `<pre>` tags (or a triple-backtick code block if the Gmail MCP renders Markdown) so it stays monospace and unwrapped.
 
-3. If Slack also fails, write the summary to the routine's stdout/log so the operator finds it in the Routines run history. **Do not silently drop the trace.**
+3. If email also fails, write the summary to the routine's stdout/log so the operator finds it in the Routines run history. **Do not silently drop the trace.**
 
 ---
 
@@ -169,7 +171,7 @@ This means a flaky day may produce `2026-04-29-mode1-0930`, `2026-04-29-mode1-09
 
 ## Allowlist Reminder
 
-This writer uses **only the Notion MCP** for its primary path: `notion-fetch`, `notion-create-pages`. On the failure-mode fallback path, it additionally uses the **Slack MCP** to DM the PM. No Orbit, Gmail, or Fathom calls are ever made by this writer — those connectors are collector / executor concerns, not log concerns.
+This writer uses **only the Notion MCP** for its primary path: `notion-fetch`, `notion-create-pages`. On the failure-mode fallback path, it additionally uses the **Gmail MCP** (as a sent-email exception per `executors/email.md`) to email the PM. No Orbit or Fathom calls are ever made by this writer — those connectors are collector / executor concerns, not log concerns. Slack is forbidden.
 
 ---
 

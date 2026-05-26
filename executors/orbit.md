@@ -1,4 +1,4 @@
-> **This executor uses ONLY the Orbit MCP. Source allowlist — primary collection: Orbit, Gmail, Slack, Fathom, Notion. Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever.**
+> **This executor uses ONLY the Orbit MCP. Source allowlist — primary collection: Orbit, Gmail, Fathom, Notion. Slack is outbound-send only via `executors/slack.md` (team-handoff + AM-ping with explicit PM `send` note). Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever.**
 
 > **Preflight (`preflight.md`) must have run before this executor is invoked.**
 
@@ -155,7 +155,7 @@ Build the `Outcome` string for the Morning Queue row. Format is concise and spec
 - `Due date changed → [new date] in Orbit [link] (category: [category])` (PM-note override only)
 - `Severity bumped → [new severity] in Orbit [link]` (PM-note override only)
 
-Multiple operations combine with periods: `Subtask #110890 created under parent #110464 → Orbit [link]. Slack draft for Hitesh appended below.`
+Multiple operations combine with periods: `Subtask #110890 created under parent #110464 → Orbit [link]. Handoff draft for Hitesh appended below.`
 
 ## What this executor does NOT do
 

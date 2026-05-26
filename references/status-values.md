@@ -95,14 +95,13 @@ The skill typically creates new projects as `Active` unless the source signal cl
 
 ## Source Systems multi-select values (Morning Queue column)
 
-Four values, one per collector:
+Three values, one per collector:
 
 - `Orbit` (green)
 - `Gmail` (red)
-- `Slack` (purple)
 - `Fathom` (orange)
 
-Each row's Source Systems field is populated with all collectors that contributed at least one signal to the item.
+Each row's Source Systems field is populated with all collectors that contributed at least one signal to the item. Priority-lane rows (Mode 1 Step 3a) always include `Orbit` and may also include `Gmail` and/or `Fathom` when matcher Job 4b cross-linked corroborating context signals.
 
 ## What this reference does NOT cover
 

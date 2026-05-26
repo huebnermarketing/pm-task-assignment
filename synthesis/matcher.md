@@ -1,16 +1,16 @@
 > **MANDATORY: `preflight.md` must run before any logic in this file. Do not call any tool, do not act on user input, until preflight has completed successfully. This includes scheduled-task triggers — preflight runs even when invoked by the scheduler.**
 
-> **Source allowlist:** Primary collection — Orbit, Gmail, Slack, Fathom, Notion. Read-only references on demand — Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever. The allowlist is enforced even under experimental scope or forced runs.
+> **Source allowlist:** Primary collection — Orbit, Gmail, Fathom, Notion (Slack forbidden). Read-only references on demand — Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever. The allowlist is enforced even under experimental scope or forced runs.
 
 # Matcher
 
 ## Purpose
 
-Takes every signal from all four collectors (Orbit, Gmail, Slack, Fathom) and turns them into a clean, ordered list of items the PM will see in today's Morning Queue.
+Takes every signal from the three collectors (Orbit, Gmail, Fathom) — including the Orbit collector's priority-pass output (`signal_type: am_handed_to_pm_overnight_due_today`) — and turns them into a clean, ordered list of items the PM will see in today's Morning Queue.
 
 ## Identity matching is alias-aware
 
-When the matcher classifies senders, recipients, or the running PM's identity, it matches the email or Slack handle against the canonical email AND any aliases stored in the PM's Preferences (under the `Email aliases` field).
+When the matcher classifies senders, recipients, or the running PM's identity, it matches the email address against the canonical email AND any aliases stored in the PM's Preferences (under the `Email aliases` field).
 
 Examples:
 
@@ -49,15 +49,16 @@ The matcher checks the drop list BEFORE deciding Create-subtask vs Flag. If a si
 
 For every signal that survives the static drop list, run a PM-action check before deciding Flag vs Drop:
 
-1. Capture the signal's arrival timestamp (`signal.timestamp` — when the email arrived, when the Orbit comment was posted, when the Slack message landed, when the Fathom call ended).
+1. Capture the signal's arrival timestamp (`signal.timestamp` — when the email arrived, when the Orbit comment was posted, when the Fathom call ended).
 2. Look for PM-originated activity in the window `(signal.timestamp, mode1_fire_time)` that matches the signal's context:
    - **Gmail:** any thread message with `labelIds` containing `SENT` from the PM's canonical email or alias, on the same `threadId` as the signal.
    - **Orbit:** any task comment authored by the PM (`actor_id == PM_user_id`) on the same task or project, OR any task field change (status, due date, assignee) actored by the PM. From `get_activity_log`.
-   - **Slack:** any message authored by the PM in the same channel or DM thread as the signal.
 3. If matching PM activity is found, drop the signal with `filter_reason: pm_already_handled`. Capture the PM-action timestamp + a one-line note in `filtered_signals` so the audit trail shows what was already resolved.
 4. If no matching PM activity, the signal is unhandled — proceed to Job 5 to decide Create-subtask vs Flag.
 
-This rule directly fixes the over-flagging observed in early runs. The PM action set (Sent emails, Orbit comments, Slack outbound) IS the PM telling the system "I've already got this." The matcher must respect that signal.
+**Bypass for priority-lane signals.** Signals carrying `bypass_pm_action_filter: true` (set by the Orbit collector's Priority Pass on `am_handed_to_pm_overnight_due_today` signals) are NOT subject to this filter. They proceed directly to Job 5 regardless of whether the PM commented on the parent task overnight. Rationale: an AM-handed task is pending delegation even if the PM acknowledged it ("got it, will look in the morning"); the delegation work itself hasn't happened. Acknowledgement ≠ handled for this signal class.
+
+This rule directly fixes the over-flagging observed in early runs. The PM action set (Sent emails, Orbit comments) IS the PM telling the system "I've already got this." The matcher must respect that signal — except where the priority-lane bypass overrides.
 
 ### Project-type lookup
 
@@ -69,12 +70,12 @@ A list of items. Each item becomes one row in the Morning Queue database. For ea
 
 - `summary` — one-line plain-English summary the PM reads (in normal professional English, not simplified)
 - `project` — the Orbit project name (best match)
-- `recommended_action` — short phrase, e.g., "Create task + Slack Vijay"
+- `recommended_action` — short phrase, e.g., "Create task + handoff to Vijay"
 - `recommended_assignee` — name + short reason
 - `ai_notes` — anything unusual, uncertainty flags, split reasoning
 - `source_signals` — the set of collector signals that contributed to this item
 - `proposed_orbit_body` — 6-section task body (from `schemas/orbit-dq-standard.md`), in plain language (per `writers/plain-language.md`) — used by the Orbit Executor if approved
-- `proposed_slack_handoff` — plain-language message for the assignee
+- `proposed_handoff` — plain-language message for the assignee, copied + sent by PM through whatever channel they use for that team member
 - `proposed_email` — normal-English email draft if the action involves emailing an AM or client
 
 ## Jobs in order
@@ -90,26 +91,22 @@ For Gmail signals:
 - Read subject and body for project-name keywords
 - If multiple projects match, pick the most recently active one and flag `Uncertain:` with an AI Note
 
-For Slack signals:
-- Check channel name for project-name or client-name match
-- Check sender against AM list → map to their assigned projects
-- For DMs, scan message content for project keywords
-- If no match, leave `project = null` and flag as `Uncertain:`
-
 For Fathom signals:
 - Check meeting title and attendee list
 - Match external attendees to client contacts
 - Match meeting title against client/project names
 - If a meeting covered multiple projects, split into multiple items (one per project)
 
+For priority-lane Orbit signals (`signal_type: am_handed_to_pm_overnight_due_today`): `project_id` and `parent_task_id` are already on the signal — no inference needed. Skip the rest of Job 1 for these and pass straight to Job 4b.
+
 ### Job 2 — Deduplicate across sources
 
-A single issue may show up in Gmail, Slack, and Orbit. Matcher merges them into one item.
+A single issue may show up in Gmail, Fathom, and Orbit. Matcher merges them into one item.
 
 Match signals as the same item when:
 - Same project AND same topic/deliverable (keyword overlap in content)
-- Same client contact sent the email AND AM discussed it in Slack within the same \~24-hour window
-- Fathom meeting's action item overlaps with a subsequent email or Slack ask
+- Same client contact sent the email AND AM discussed it in a Fathom call within the same \~24-hour window
+- Fathom meeting's action item overlaps with a subsequent email ask
 
 When merging, preserve all source signals in `source_signals`. The row's detail page will cite each source separately.
 
@@ -166,6 +163,25 @@ Rules:
 - No emojis. No narrative context.
 - Max 120 chars total (Notion title field stays scannable across the column).
 
+### Job 4b — Context cross-link (Gmail/Fathom → Orbit)
+
+Before deciding row type in Job 5, attach corroborating Gmail and Fathom signals to each Orbit signal so the row detail page renders the full backstory in one place. Priority-lane signals get this pass first; normal Orbit signals get it second.
+
+For each Orbit signal (priority-lane first, then normal-pass), scan the Gmail and Fathom signal lists and link any signal whose `context_link` corroborates the Orbit event. A Gmail or Fathom signal corroborates an Orbit signal when ANY of the following hold:
+
+1. **Project match.** `gmail_or_fathom.context_link.project_id_candidates` contains the Orbit signal's `project_id`.
+2. **Actor match.** `gmail_or_fathom.context_link.actor_emails` intersects with the Orbit signal's AM identity (for priority-lane: `signal.am_actor_email` + aliases) or with the parent task's follower / assignee emails.
+3. **Topic match.** `gmail_or_fathom.context_link.topic_keywords` overlaps with the parent task title or task body, above a simple threshold (≥ 2 keyword matches, case-insensitive). No embeddings — substring or token-overlap is sufficient.
+4. **Time proximity.** `gmail_or_fathom.context_link.timestamp` is within ±24h of the Orbit signal's event timestamp (`event_timestamp` for priority-lane, `timestamp` for normal-pass).
+
+Match strength: a Gmail/Fathom signal that hits 2+ rules above is high-confidence corroboration. A signal that hits exactly 1 rule is weak corroboration — still attach, but mark it weak so the row detail Sources section can render it under a `Possible context` subheading.
+
+For each Orbit signal, populate `context_signals[]` with the matched Gmail/Fathom signals, each annotated with `match_strength: "strong" | "weak"` and `match_rules: [<which rules fired>]`.
+
+**Additivity.** Linking a Gmail or Fathom signal as context does NOT consume it. The same signal may also surface as its own row (under Job 5 — Create subtask or Flag) IF it contains a fresh ask (new requirement, new client question, new commitment). The matcher decides that independently per signal in Job 5.
+
+**Writer impact.** `writers/notion.md` reads `context_signals[]` on each row and renders the linked sources under the row's Sources H1 section in `schemas/row-detail-page.md`, using the citation formats in `writers/source-citation.md`. Priority-lane rows see the AM-handed Orbit parent task at the top of Sources, with the corroborating Gmail thread (if any) and Fathom call (if any) below.
+
 ### Job 5 — Recommend the action (2 actions only)
 
 The action set is closed and matches the Output gating section above. Pick exactly one:
@@ -179,18 +195,20 @@ If neither action fits, the signal does not become a row. Apply the Output gatin
 
 For each signal that survives the drop list AND the PM-action detection check, decide:
 
-1. **Is there a clear dev task to delegate?** If yes — concrete deliverable, identifiable scope, a developer can pick it up and run — choose `Create subtask`. Examples: "swap brochure PDF on Contact Form thank-you emails", "run AI Visibility audit on the approved competitor list", "investigate patch ETA for the Plesk security warning and update the due date".
-2. **Is the next move PM-owned?** If yes — reply to an AM, decide a scope question, brief the team for a meeting, pick which devs attend a call — choose `Flag`. Examples: "Ellen needs dev names for the 27 May Joe Warner call", "FTP credentials still missing — PM decides whether to chase client directly".
-3. **Edge case — Create subtask path requires PM-owned parent.** If `Create subtask` was chosen but the project has NO PM-owned parent task (PM-owned parent pool empty), downgrade to `Flag`. The flag's `pm_next_step` becomes: "Seed a parent task on <project> so future sub-tasks have a home." Do NOT drop the signal; the PM should know they need to create the parent.
+1. **Priority-lane override.** If the signal carries `signal_type: am_handed_to_pm_overnight_due_today`, it is ALWAYS `Create subtask`. Never `Flag`. The PM-owned parent pool is bypassed — the parent is pinned to `signal.parent_task_id` (the AM-assigned parent the PM is already the assignee on). Proceed to Job 6 to suggest the delegated assignee.
+2. **Is there a clear dev task to delegate?** If yes — concrete deliverable, identifiable scope, a developer can pick it up and run — choose `Create subtask`. Examples: "swap brochure PDF on Contact Form thank-you emails", "run AI Visibility audit on the approved competitor list", "investigate patch ETA for the Plesk security warning and update the due date".
+3. **Is the next move PM-owned?** If yes — reply to an AM, decide a scope question, brief the team for a meeting, pick which devs attend a call — choose `Flag`. Examples: "Ellen needs dev names for the 27 May Joe Warner call", "FTP credentials still missing — PM decides whether to chase client directly".
+4. **Edge case — Create subtask path requires PM-owned parent.** If `Create subtask` was chosen but the project has NO PM-owned parent task (PM-owned parent pool empty), downgrade to `Flag`. The flag's `pm_next_step` becomes: "Seed a parent task on <project> so future sub-tasks have a home." Do NOT drop the signal; the PM should know they need to create the parent. (This edge case never applies to priority-lane signals — they always have a pinned parent.)
 
 #### Picking the parent task for sub-task creation (Create subtask path)
 
 The parent **must be a task currently assigned to the running PM** on the project. Procedure:
 
-1. From the relationship map, list every open task on the project where `assignee_id == PM_user_id`. Call this the PM-owned parent pool for the project.
-2. **If the PM-owned parent pool is empty** — downgrade the row to `Flag` per the edge case above. Do not drop.
-3. **If the PM-owned parent pool has exactly one task** — that's the parent. Use it.
-4. **If the PM-owned parent pool has multiple tasks** — match the signal to a parent by phase / feature / deliverable keyword overlap with each parent's title. Recency breaks ties (most recently updated parent wins). If two parents tie cleanly on score, set `parent_task_id = null` and write AI Notes: `Uncertain: sub-task could go under PM-owned parent #X (<title>) or #Y (<title>). Please pick.` Row is still emitted as Create subtask; parent axis flagged.
+1. **Priority-lane override.** If the signal carries `signal_type: am_handed_to_pm_overnight_due_today`, set `parent_task_id = signal.parent_task_id` directly and skip the rest of this procedure. The Orbit collector's Priority Pass already determined the parent is on the PM's plate (`assignee_id == PM`) and an AM put it there with `due_date = today`. No inference needed — use the pinned parent exactly. The proposed sub-task nests under it when Mode 2 executes.
+2. From the relationship map, list every open task on the project where `assignee_id == PM_user_id`. Call this the PM-owned parent pool for the project.
+3. **If the PM-owned parent pool is empty** — downgrade the row to `Flag` per the edge case above. Do not drop.
+4. **If the PM-owned parent pool has exactly one task** — that's the parent. Use it.
+5. **If the PM-owned parent pool has multiple tasks** — match the signal to a parent by phase / feature / deliverable keyword overlap with each parent's title. Recency breaks ties (most recently updated parent wins). If two parents tie cleanly on score, set `parent_task_id = null` and write AI Notes: `Uncertain: sub-task could go under PM-owned parent #X (<title>) or #Y (<title>). Please pick.` Row is still emitted as Create subtask; parent axis flagged.
 
 #### Generating the task title (Create subtask only)
 
@@ -267,6 +285,22 @@ Write the assignee as `Name (Role) — short reason`. Examples:
 
 If the PM knows better and wants to assign outside the pod, their note will override (PM note always wins — existing rule).
 
+#### Priority-lane AI Notes wording
+
+For priority-lane signals (`signal_type: am_handed_to_pm_overnight_due_today`), the AI Notes field on the row carries an explicit one-liner naming the AM actor and the matcher's chosen branch, so the PM sees at-a-glance who handed the work and why the delegate was picked. Format:
+
+```
+<AM full name> put this on your plate overnight, due today. Proposed delegate: <delegate name> (<branch reason>).
+```
+
+Examples:
+
+- `Sarah Chen put this on your plate overnight, due today. Proposed delegate: Vijay Patel (FE) — primary FE on Agency X, 24 hrs on current homepage task.`
+- `Sarah Chen put this on your plate overnight, due today. Proposed delegate: Atul (WP) — WordPress / PHP in Matrix A, no prior task on BrightPath, lightest workload (3 open tasks).`
+- `Sarah Chen put this on your plate overnight, due today. Proposed delegate: Uncertain — no FE in Matrix A or Floaters. Cross-matrix candidates: Jay Panchal (Design Matrix). Please pick.`
+
+The "put this on your plate overnight, due today" phrasing is intentional — it tells the PM (a) this is not a signal you generated, (b) the clock is today, (c) someone external to your team made the assignment decision. This framing matters because the row appears at the top of the queue and the PM should grok the context in under three seconds.
+
 ### Job 7 — Generate the proposed Orbit body (Create subtask path only)
 
 The body content depends on the row's action:
@@ -275,17 +309,19 @@ The body content depends on the row's action:
 
 **Flag path** — does NOT carry a `proposed_orbit_body`. No Orbit write happens for a Flag row. Job 7 is skipped for Flag rows entirely. The row's detail page substitutes `Proposed Orbit Task Body` with `PM next step` (rendered from the `pm_next_step` clause set in Job 5).
 
-### Job 8 — Generate the proposed Slack handoff
+### Job 8 — Generate the proposed handoff
 
-The Slack handoff message is the team-Slack DM the PM copies-and-sends after Mode 2 fires (per `executors/slack.md`). Generate it for the **Create subtask** path only:
+The handoff message is the team handoff draft the PM copies-and-sends after Mode 2 fires. It lands on the row's Notion detail page under the `Proposed Handoff` H1 section and is also appended to the row's `Outcome` block when Mode 2 executes. The PM delivers it through whatever channel they use for that team member (direct message, in-person, email, etc.). Generate it for the **Create subtask** path only:
 
 - Tell the assignee a new sub-task landed under the PM's parent task, the work in one short paragraph, the parent context, and the sub-task URL.
 
 Plain language per `writers/plain-language.md`. Reminder to log hours if Preferences has that always-include rule.
 
-Flag rows do NOT generate a Slack handoff (no dev work to delegate; PM owns the next move).
+For priority-lane rows specifically, the handoff body should additionally note that the parent task was handed down by the AM: `<AM name> assigned this task to <PM name> overnight; passing the dev work to you to start today.` This sets the assignee's expectation that the timeline is same-day.
 
-NO Slack handoff is generated for AMs or clients — those are PM-handled outside the queue per the Output gating filter.
+Flag rows do NOT generate a handoff (no dev work to delegate; PM owns the next move).
+
+NO handoff is generated for AMs or clients — those are PM-handled outside the queue per the Output gating filter.
 
 ### Job 9 — Generate the proposed email
 
@@ -310,7 +346,7 @@ For every signal (or grouped signal-set) the Output gating filter dropped, appen
 
 ```
 {
-  "source": <orbit | gmail | slack | fathom>,
+  "source": <orbit | gmail | fathom>,
   "summary": <one-line description of what was dropped>,
   "filter_reason": <one of: pm_already_handled | hours_overrun_alert | pm_own_task_orbit_ui | rollup | standup_recap | third_party_automation | marketing_or_system_email | project_type_unknown>,
   "citations": [<source links — gmail thread URL, orbit task URL, fathom recording URL>]
@@ -332,12 +368,13 @@ This is the safety valve: the queue stays tight, but nothing the collector saw i
 ## Ordering the items on the page
 
 Sort by a simple heuristic:
+0. **Priority-lane rows first** — items where `signal_type == am_handed_to_pm_overnight_due_today`. Within the priority lane, sort by `parent_task_due_time` ascending if available (Orbit due-date timestamp); fall back to `event_timestamp` ascending (earliest AM action first) when no due-time is set. These rows lead the queue every time so the PM cannot miss them on the way to the office.
 1. Items with high-urgency signals first (overdue tasks, blockers, urgent language like "urgent", "blocking", "today")
 2. Items from external clients ahead of internal
 3. Items involving multiple sources (cross-system signals) ahead of single-source
 4. Everything else by recency (newest first)
 
-No scoring model, no scoring columns. Just a sensible order so the PM reads important things first.
+No scoring model, no scoring columns. Just a sensible order so the PM reads important things first. Rule 0 is non-negotiable — priority-lane rows always sit at the top of the queue regardless of what rules 1–4 would do to them.
 
 ## Output format
 

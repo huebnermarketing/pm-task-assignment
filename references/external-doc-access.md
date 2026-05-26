@@ -1,6 +1,6 @@
 # Reference — External Document Access (read-only)
 
-Some signals collected from the primary sources (Gmail / Slack / Fathom / Orbit / Notion) reference documents stored elsewhere — typically a Google Drive file, a Google Doc, a Google Sheet, or a SharePoint document. The skill MAY fetch those documents read-only so the row's context (and any task body produced from it) is grounded in the actual content, not just the link.
+Some signals collected from the primary sources (Gmail / Fathom / Orbit / Notion) reference documents stored elsewhere — typically a Google Drive file, a Google Doc, a Google Sheet, or a SharePoint document. The skill MAY fetch those documents read-only so the row's context (and any task body produced from it) is grounded in the actual content, not just the link.
 
 This file defines when and how. It does NOT extend the primary collection scope — these MCPs are never used to scan or list, only to fetch a specific resource that an allowlisted primary signal already pointed at.
 
@@ -8,9 +8,9 @@ This file defines when and how. It does NOT extend the primary collection scope 
 
 All four conditions must hold:
 
-1. The trigger comes from an allowlisted primary source (Gmail / Slack / Fathom / Orbit / Notion).
-2. The trigger explicitly references the document — e.g., a link in an email body, an attachment-link in a Slack message, an action item from a Fathom transcript citing a Drive file, an Orbit task description with a Drive URL, a Preferences page link.
-3. The document content is needed to fill in row detail context, the proposed Orbit task body, or the proposed Slack handoff. If the link is just incidental (e.g., a project-folder URL the PM never opens), do not fetch.
+1. The trigger comes from an allowlisted primary source (Gmail / Fathom / Orbit / Notion).
+2. The trigger explicitly references the document — e.g., a link in an email body, an action item from a Fathom transcript citing a Drive file, an Orbit task description with a Drive URL, a Preferences page link.
+3. The document content is needed to fill in row detail context, the proposed Orbit task body, or the proposed handoff draft. If the link is just incidental (e.g., a project-folder URL the PM never opens), do not fetch.
 4. The MCP for that document type is authenticated and responsive. If it is not authenticated, log on the row's `AI Notes` (`Could not fetch [filename] — [MCP] not authenticated`) and continue.
 
 ## What is allowed
@@ -35,7 +35,7 @@ When the skill reads an external document for a row's context, it cites the read
 
 1. **Row detail page → `Sources` heading → `Document read` subsection** — per `schemas/row-detail-page.md`. Includes filename, source MCP, the date it was read by the skill, and a one-paragraph summary of what was extracted.
 2. **Orbit task body → REFS section** — short citation link. If the document was read for context, the citation explicitly says so. Per `writers/source-citation.md`.
-3. **Slack handoff → "Context you need" list** — filename + a pointer back to the originating signal (the email or Slack message it was attached to).
+3. **Handoff draft → "Context you need" list** — filename + a pointer back to the originating signal (the email it was attached to, the Fathom call it was mentioned in, or the Orbit task that linked it).
 
 ## Auditability
 

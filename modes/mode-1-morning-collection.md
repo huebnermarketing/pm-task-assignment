@@ -1,6 +1,6 @@
 > **MANDATORY: `preflight.md` must run before any logic in this file. Do not call any tool, do not act on user input, until preflight has completed successfully. This includes routine triggers — preflight runs even when invoked by a scheduled cloud routine.**
 
-> **Source allowlist:** Primary collection — Orbit, Gmail, Slack, Fathom, Notion. Read-only references on demand — Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever. The allowlist is enforced even under experimental scope or forced runs.
+> **Source allowlist:** Primary collection — Orbit, Gmail, Fathom, Notion (Slack forbidden). Read-only references on demand — Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever. The allowlist is enforced even under experimental scope or forced runs.
 
 # Mode 1 — Morning Collection Run
 
@@ -27,7 +27,7 @@ Extract:
 - Last-run timestamp (if any)
 - Morning run time, execution run time, escalation time + backup
 - Account manager list with preferred channels
-- Default email/Slack preferences, always-include rules, tone samples
+- Default email and handoff-channel preferences, always-include rules, tone samples
 
 ### Step 2 — Determine lookback window
 
@@ -44,14 +44,30 @@ Call `references/pod-matrix.md` to fetch and parse the org Pod Matrix from `POD_
 
 This step is non-blocking: a matrix outage must never block the morning queue.
 
-### Step 3 — Fire collectors in parallel
+### Step 3a — Orbit priority pass (sequential, BLOCKING)
 
-Call all four collectors. Do not wait for one before starting the next — they're independent.
+Call `collectors/orbit.md` with `priority_pass = true`. This pass narrows scope to parent tasks an Account Manager (AM) created or reassigned to the running PM overnight, with `due_date = today`.
 
-- `collectors/orbit.md` — scoped to PM's projects (owner + follower + active in last 6 months)
-- `collectors/gmail.md` — scoped to PM's inbox, last <lookback_window>
-- `collectors/slack.md` — scoped to client/AM/project direct asks, PM DMs
-- `collectors/fathom.md` — scoped to calls PM attended or missed in <lookback_window>
+Procedure (full details in `collectors/orbit.md` § Priority Pass):
+
+1. Resolve AM identities from Preferences (canonical email + aliases) to Orbit `user_id`s via the cached `list_users` response. The Pod Matrix fetch in Step 2.5 has already populated this cache.
+2. Call `get_project_task_list` with `due_date_filter: "today"` AND `assignee_id == PM_user_id` per project in the PM's universe.
+3. Cross-reference against `get_activity_log` (called below in Step 3b) for the AM actor on either `created_by` or `assignee_change` events since `last_run_timestamp`.
+4. Return `priority_signals[]`, each carrying `signal_type: am_handed_to_pm_overnight_due_today`, `parent_task_id`, `am_actor_id`, `bypass_pm_action_filter: true`.
+
+This pass is sequential and blocking — Step 3b does not start until Step 3a returns. Rationale: priority-lane signals must lead the queue and must be available to matcher Job 4b as the anchor for context-link cross-referencing.
+
+If Preferences has zero AMs configured, the priority pass returns an empty list. Log `priority_pass_no_ams_configured` to Run Log and continue. Mode 1 still completes — only the priority lane is empty for this run.
+
+### Step 3b — Remaining collectors in parallel
+
+After Step 3a returns, call the remaining collectors in parallel. Do not wait for one before starting the next — they're independent at this stage.
+
+- `collectors/orbit.md` (normal pass — `priority_pass = false`) — full Orbit activity since `last_run_timestamp` minus any tasks already surfaced in Step 3a (deduplicate by `task_id`).
+- `collectors/gmail.md` — scoped to PM's inbox, last <lookback_window>. Also emits `context_link` metadata per signal so matcher Job 4b can cross-link to Orbit signals.
+- `collectors/fathom.md` — scoped to calls PM attended or missed in <lookback_window>. Also emits `context_link` metadata.
+
+**Dual role of Gmail and Fathom.** These collectors do double duty: (a) emit standalone signals where a fresh ask, client question, or action item exists, and (b) carry context-link metadata that `synthesis/matcher.md` Job 4b attaches to corroborating Orbit signals — especially the priority-lane signals from Step 3a. The same Gmail thread between the AM and PM about a priority-lane parent task gets BOTH treatments: it surfaces as Sources context under the priority-lane row, AND (if it contains a fresh ask) may also surface as its own row.
 
 Each collector returns a list of raw signals with source metadata and full context.
 
@@ -62,7 +78,9 @@ This note is included in the summary section at the top of the dated page.
 
 ### Step 3.5 — Post-collector assertion (MANDATORY)
 
-Before passing signals to the matcher, verify the Orbit collector actually invoked its non-skippable tool sequence. This guards against the runtime LLM taking a "fast path" that pulls workload metadata only and silently drops every comment + activity-log entry inside the lookback window.
+Before passing signals to the matcher, verify the Orbit collector actually invoked its non-skippable tool sequence in BOTH the priority pass (Step 3a) and the normal pass (Step 3b). This guards against the runtime LLM taking a "fast path" that pulls workload metadata only and silently drops every comment + activity-log entry inside the lookback window.
+
+Additional priority-pass assertion: if `priority_signals[]` is non-empty, every entry must carry `bypass_pm_action_filter: true`. The matcher reads this flag to skip the PM-action drop rule (non-negotiable rule #19) for priority-lane signals. If the flag is missing on any priority signal, log `priority_pass_missing_bypass_flag` to Run Log and patch the flag to `true` before passing to the matcher.
 
 Run the following checks on the Mode 1 tool trace and Orbit signals list:
 
@@ -77,13 +95,16 @@ Output of this step: either a hard abort (case 1) or a clean signals list with w
 ### Step 4 — Synthesize
 
 Feed all collected signals into `synthesis/matcher.md`. The matcher:
-- Groups signals by client + project using the Orbit relationship map
+- Groups signals by client + project using the Orbit relationship map (Job 1)
+- **Runs Job 4b context cross-link** — for each Orbit signal (priority-lane first, then normal-pass), scan Gmail and Fathom signals for corroborating context via project_id / actor_emails / topic_keywords / ±24h time proximity. Attach matched Gmail/Fathom signals as `context_signals[]` on the Orbit signal. Cross-linking is additive — the same Gmail/Fathom signal may also become its own row if it contains a fresh ask.
 - Generates a one-line plain-language summary per item (normal English — PM reads this)
 - Flags items as `Uncertain:` when it can't confidently group or classify
-- Recommends an action per item
+- Recommends an action per item. Priority-lane signals always become `Create subtask` rows with `parent_task_id` PINNED to `signal.parent_task_id` (the AM-assigned parent the PM is currently the assignee on).
 - Calls `synthesis/pod-inference.md` to compute the candidate pool per project (matrix members ∪ Orbit followers/recent-assignees)
-- Picks the assignee via the 4-branch decision tree in `synthesis/matcher.md` Job 6: history wins → matrix availability → floater availability → cross-matrix Uncertain. Availability calls (`get_user_workload`) fire only on the no-history fallback path.
-- Writes AI Notes as needed (including any matrix-unavailable degradation note)
+- Picks the assignee via the 4-branch decision tree in `synthesis/matcher.md` Job 6: history wins → matrix availability → floater availability → cross-matrix Uncertain. Availability calls (`get_user_workload`) fire only on the no-history fallback path. Priority-lane rows run the same tree — PM did not pick a delegate; matcher suggests one.
+- For priority-lane rows, writes AI Notes in the form: `<AM full name> put this on your plate overnight, due today. Proposed delegate: <name> (<reason>).`
+- Skips the PM-action drop rule (non-negotiable #19) for any signal carrying `bypass_pm_action_filter: true`
+- Sort rule 0 surfaces priority-lane rows at the top of the queue, ahead of all other ordering heuristics
 
 ### Step 5 — Write to Notion
 
@@ -100,7 +121,7 @@ Call `writers/notion.md` to:
    - Sources heading (with citations from `writers/source-citation.md`)
    - Recommended Action heading
    - Proposed Orbit Task Body heading (from `schemas/orbit-dq-standard.md`, in plain language from `writers/plain-language.md`)
-   - Proposed Slack Handoff heading (plain language)
+   - Proposed Handoff heading (plain language)
    - Proposed Email heading (if applicable, normal English)
    - AI Notes heading
    - Reference Context toggle at the bottom (labeled — skill's working memory)
@@ -115,7 +136,7 @@ Update the Preferences page's `last_morning_run` field to now.
 
 Call `writers/run-log.md` with the run summary:
 - Timestamp range (start → end of this Mode 1 fire)
-- Source counts per collector (Orbit / Gmail / Slack / Fathom signal counts)
+- Source counts per collector (Orbit / Gmail / Fathom signal counts)
 - Item count written to today's queue
 - Decisions list (key synthesis decisions, especially `Uncertain:` flags and assignee picks)
 - Connector status (which MCPs were healthy, which degraded, which failed)
@@ -125,7 +146,7 @@ The writer creates a row in the Run Log database on the Notion parent and a link
 
 ### Step 8 — Exit silently
 
-Mode 1 does not notify the PM on completion. The PM will open Notion on their own schedule. No Slack ping, no email. Silent.
+Mode 1 does not notify the PM on completion. The PM will open Notion on their own schedule. No email, no push. Silent.
 
 Exception: if an MCP source failed, log the note on the page summary so the PM sees it when they open.
 
@@ -133,7 +154,7 @@ Exception: if an MCP source failed, log the note on the page summary so the PM s
 
 - **Summary** column: plain-language one-liner in normal English (PM reads this)
 - **Status** column: set to `Recommended Action` by default
-- **Recommended Action** column: short phrase like "Create task + Slack Vijay"
+- **Recommended Action** column: short phrase like "Create task + handoff to Vijay"
 - **Recommended Assignee** column: person name + short reason ("Vijay Patel (FE) — primary FE on Agency X")
 - **PM Notes** column: empty (PM fills this)
 - **Outcome** column: empty (Mode 2 fills this after execution)
@@ -145,7 +166,7 @@ Exception: if an MCP source failed, log the note on the page summary so the PM s
 |---|---|
 | Preferences page missing | Route to `first-run-setup.md` and stop |
 | Individual collector fails | Log note on page summary, continue with other collectors |
-| Notion write fails | Retry once. If still fails, stop and Slack the PM: "Couldn't write today's morning queue — [error]. I'll retry on next scheduled run." |
+| Notion write fails | Retry once. If still fails, stop and email the PM (sent, not drafted): "Couldn't write today's morning queue — [error]. I'll retry on next scheduled run." |
 | No signals at all | Still create today's page with summary "0 items for your morning. You're all caught up." and Ready toggle. Scheduled Mode 2 will see no work and exit cleanly. |
 | Zero projects match the PM's Orbit scope | Write page summary "No projects found under your Orbit user. Check your Orbit account or update your identity in Preferences." |
 

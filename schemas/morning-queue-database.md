@@ -72,7 +72,7 @@ Recommended Action ─► Approved (by PM)         ─► Done (by Mode 2)
 | Editable by PM | Yes, but rare — PM usually drops a note in `PM Notes` instead of editing this column |
 | Default value | A short phrase describing one of the two locked actions (`Create subtask` or `Flag`) plus what Mode 2 will do. Per `synthesis/matcher.md` Job 5 the action set is closed to these two. |
 | Maximum length | Recommend under 100 chars for scannability |
-| Sample values | `Create subtask under #110464, assign to Hitesh (SEO/AI) + Slack handoff` <br> `Create subtask under #106447, assign to Atul (WP) + Slack handoff` <br> `Flag — PM owns next step (reply to Ellen). No Mode 2 action.` |
+| Sample values | `Create subtask under #110464, assign to Hitesh (SEO/AI) + handoff draft` <br> `Create subtask under #106447, assign to Atul (WP) + handoff draft` <br> `Flag — PM owns next step (reply to Ellen). No Mode 2 action.` |
 
 ### Column 4 — `Recommended Assignee`
 
@@ -110,7 +110,7 @@ Recommended Action ─► Approved (by PM)         ─► Done (by Mode 2)
 | Default value | Empty |
 | Populated when | Mode 2 finishes processing this row (success or failure) |
 | Format | Concise, specific, with Orbit links where applicable |
-| Sample values | `Subtask #110890 created under parent #110464. Slack draft for Hitesh appended below.` <br> `Subtask #110918 created under parent #109958. Severity bumped to Important per your note. Slack draft appended below.` <br> `Flag row — no Mode 2 action.` <br> `FAILED — Orbit create_subtask returned 409. Will retry if re-approved.` |
+| Sample values | `Subtask #110890 created under parent #110464. Handoff draft for Hitesh appended below.` <br> `Subtask #110918 created under parent #109958. Severity bumped to Important per your note. Handoff draft appended below.` <br> `Flag row — no Mode 2 action.` <br> `FAILED — Orbit create_subtask returned 409. Will retry if re-approved.` |
 
 ### Column 7 — `Project` (HIDDEN from default view)
 
@@ -136,16 +136,17 @@ Recommended Action ─► Approved (by PM)         ─► Done (by Mode 2)
 | Editable by PM | No (skill-managed) |
 | Default value | At least one source — items always have a contributing collector |
 
-**Multi-select options (4 total):**
+**Multi-select options (3 total):**
 
 | Option name (exact text) | Color |
 |---|---|
 | `Orbit` | green |
 | `Gmail` | red |
-| `Slack` | purple |
 | `Fathom` | orange |
 
-The skill picks any combination of the four. A row that came from a single Gmail thread gets `[Gmail]`. A row aggregated from email + Slack + Orbit gets `[Gmail, Slack, Orbit]`.
+The skill picks any combination of the three. A row that came from a single Gmail thread gets `[Gmail]`. A row aggregated from email + Orbit gets `[Gmail, Orbit]`. Priority-lane rows (Mode 1 Step 3a) always include `Orbit` and may also include `Gmail` and/or `Fathom` if matcher Job 4b cross-linked corroborating context signals.
+
+> Historical note: previous schema versions also offered a `Slack` (purple) option. Existing rows with that tag are preserved as an immutable audit trail; new runs cannot produce it.
 
 ### Column 9 — `AI Notes` (HIDDEN from default view)
 
@@ -226,7 +227,7 @@ CREATE TABLE (
   "PM Notes" RICH_TEXT,
   "Outcome" RICH_TEXT,
   "Project" RICH_TEXT,
-  "Source Systems" MULTI_SELECT('Orbit':green, 'Gmail':red, 'Slack':purple, 'Fathom':orange),
+  "Source Systems" MULTI_SELECT('Orbit':green, 'Gmail':red, 'Fathom':orange),
   "AI Notes" RICH_TEXT
 )
 ```
@@ -245,10 +246,10 @@ When the schema needs to evolve (e.g., adding a column in a future version), use
 |---|---|
 | Summary | `Create subtask on ECP AI Visibility Audit #110464 — Run AI Visibility audit on approved competitor list. To Hitesh.` |
 | Status | `Approved` |
-| Recommended Action | `Create subtask under #110464, assign to Hitesh (SEO/AI) + Slack handoff` |
+| Recommended Action | `Create subtask under #110464, assign to Hitesh (SEO/AI) + handoff draft` |
 | Recommended Assignee | `Hitesh Asnani (SEO/AI) — Marketing/SEO Matrix, in followers, Ellen named him in approval comment` |
 | PM Notes | *(empty — PM accepted the recommendation)* |
-| Outcome | `Subtask #110890 created under parent #110464 (assigned to Abhishek). Slack handoff drafted (copy from row page).` |
+| Outcome | `Subtask #110890 created under parent #110464 (assigned to Abhishek). Handoff draft for Hitesh appended below (copy from row page).` |
 | Project | `ECP AI Visibility Audit (#8545)` |
 | Source Systems | `Gmail, Orbit` |
 | AI Notes | `Parent picked: #110464 (Signed SOW) — only PM-owned task open on this project.` |
@@ -259,10 +260,10 @@ When the schema needs to evolve (e.g., adding a column in a future version), use
 |---|---|
 | Summary | `Create subtask on Brother Plesk #109958 — Investigate patch ETA with WP Maintenance. To Atul.` |
 | Status | `Approved` |
-| Recommended Action | `Create subtask under #109958, assign to Atul (WP) + Slack handoff` |
+| Recommended Action | `Create subtask under #109958, assign to Atul (WP) + handoff draft` |
 | Recommended Assignee | `Atul Mehra (WP) — WP Maintenance lead, 2 prior tasks on Brother last 3mo` |
 | PM Notes | *(empty)* |
-| Outcome | `Subtask #110918 created under parent #109958. Slack handoff drafted (copy from row page).` |
+| Outcome | `Subtask #110918 created under parent #109958. Handoff draft for Atul appended below (copy from row page).` |
 | Project | `Brother Site Issues (#8461) — Maintenance` |
 | Source Systems | `Orbit, Fathom` |
 | AI Notes | `Maintenance project type — previously this would have been a Reassign row; new rule unifies on Create subtask under the PM-owned parent.` |

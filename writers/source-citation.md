@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Every output the skill produces that's derived from a source must cite the source. This applies to Morning Queue row detail pages, Orbit task bodies, Slack handoffs that reference attached documents, and emails that quote prior conversation.
+Every output the skill produces that's derived from a source must cite the source. This applies to Morning Queue row detail pages, Orbit task bodies, handoff drafts that reference attached documents, and emails that quote prior conversation.
 
 ## The rule
 
@@ -11,7 +11,6 @@ Every output the skill produces that's derived from a source must cite the sourc
 Non-negotiable. Applies to:
 
 - Email threads (cite sender, date, thread, subject)
-- Slack messages (cite channel, sender, timestamp, link)
 - Orbit tasks / comments / attachments (cite task link, exact quote for comments, filename for attachments)
 - Fathom meetings (cite meeting title, date, recording URL, timestamp for specific moments)
 - **Documents the skill reads** (PDFs, images, PPTs, Word docs, etc. — cite the filename and where it was attached)
@@ -35,16 +34,6 @@ Thread: Homepage redesign — revision feedback
 Subject: Homepage redesign — revision feedback
 Excerpt: "<relevant quote from the email, under 200 characters>"
 [Open in Gmail](<gmail_url>)
-```
-
-### Slack message
-
-```
-Slack — #agency-x
-From: Sarah Chen (AM)
-Date: 24 April 2026, 6:15 PM IST
-Message: "<exact message text>"
-[Jump to message](<slack_permalink>)
 ```
 
 ### Orbit task or comment
@@ -119,7 +108,7 @@ For document sources, the filename appears explicitly:
 **REFS:** [Figma](<url>) | [Client feedback PDF: homepage_revision_feedback.pdf](<url>)
 ```
 
-### In Slack handoffs
+### In handoff drafts
 
 Citations are more casual but still present. List under "Context you need":
 
@@ -166,11 +155,11 @@ Attached to: Orbit task #105892 (link temporarily unavailable)
 Content read by the skill on 25 April 2026
 ```
 
-If a Slack or Gmail message can't be pulled precisely, cite approximately:
+If a Gmail message can't be pulled precisely, cite approximately:
 
 ```
-Slack — #agency-x (approximate)
-Recent message from Sarah Chen (AM) regarding Agency X impatience.
+Email — Gmail (approximate)
+Recent thread with Sarah Chen (AM) regarding Agency X impatience.
 [Link unavailable]
 ```
 

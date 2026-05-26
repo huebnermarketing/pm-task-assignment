@@ -1,6 +1,6 @@
 > **MANDATORY: `preflight.md` must run before any logic in this file. Do not call any tool, do not act on user input, until preflight has completed successfully. This includes scheduled-task triggers — preflight runs even when invoked by the scheduler.**
 
-> **Source allowlist:** Primary collection — Orbit, Gmail, Slack, Fathom, Notion. Read-only references on demand — Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever. The allowlist is enforced even under experimental scope or forced runs.
+> **Source allowlist:** Primary collection — Orbit, Gmail, Fathom, Notion (Slack forbidden). Read-only references on demand — Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever. The allowlist is enforced even under experimental scope or forced runs.
 
 # Notion Writer
 
@@ -99,18 +99,18 @@ For each item in the matcher's output array (after Step 5.5 gating):
    - `Recommended Assignee` — name + role + short reason
    - `PM Notes` — empty
    - `Project` — the matched project name
-   - `Source Systems` — multi-select of which collectors contributed (Orbit, Gmail, Slack, Fathom)
+   - `Source Systems` — multi-select of which collectors contributed (Orbit, Gmail, Fathom)
    - `AI Notes` — any uncertainty flags or split reasoning; empty if none
    - `Outcome` — empty (filled by Mode 2)
 
 2. Populate the row's page content per `schemas/row-detail-page.md`:
    - `Summary` heading + the matcher's summary
-   - `Sources` heading + full citations per `writers/source-citation.md`
+   - `Sources` heading + full citations per `writers/source-citation.md`. When matcher Job 4b produced a `context_signals[]` array on this row (Gmail/Fathom signals linked to a primary Orbit signal as corroborating context), render each linked signal as an H2 subsection under Sources. High-confidence cross-links go under the primary Sources list; weak cross-links (match_strength="weak") go under an H2 `Possible context` subsection.
    - `Recommended Action` heading + reasoning
    - `Proposed Orbit Task Body` heading + 6-section body in plain language
-   - `Proposed Slack Handoff` heading + plain-language message
+   - `Proposed Handoff` heading + plain-language message
    - `Proposed Email` heading + email draft (if applicable)
-   - `AI Notes` heading (if any notes)
+   - `AI Notes` heading (if any notes). For priority-lane rows, AI Notes carries the matcher's `<AM> put this on your plate overnight, due today. Proposed delegate: <name> (<reason>).` line.
    - Bottom toggle: `Reference Context for the Skill — working memory, not for review`, containing the full raw signals and pod inference reasoning
 
 ## Flow — updating rows after Mode 2
@@ -119,14 +119,61 @@ For each row Mode 2 executed:
 
 - Flip `Status` to `Done` (or leave at prior state if failure; see `modes/mode-2-execution.md`)
 - Write the `Outcome` column with the concise result string
-- If the row produced a team / AM Slack draft (the default path for non-`send` rows), append a `Slack draft (copy to send)` block to the row's detail page under the existing Outcome content. Block contents:
-  - First line — `Audience: <Team | AM | Client>` and `Recipient: <name> (<slack handle>)`
-  - The full plain-language draft body returned by `executors/slack.md`
+- If the row produced a team / AM handoff draft (the default path for every Create-subtask row), append a `Handoff draft (copy + paste)` block to the row's detail page under the existing Outcome content. Block contents:
+  - First line — `Audience: <Team | AM | Client>` and `Recipient: <name> (<canonical email>)`
+  - The full plain-language draft body produced by the matcher's `proposed_handoff` and applied through `writers/plain-language.md`
 - No other changes to row detail page content — source-of-truth stays intact.
+
+## Flow — Slack handles reference block on the dated page (end of Mode 1)
+
+Append a small reference block to today's dated page, **directly above the Morning Queue inline database**, listing the Slack handles of every recipient the day's rows could potentially auto-send to via `executors/slack.md`. Purpose: (a) gives the executor a single in-page lookup to resolve handles at Mode 2 send time without re-fetching Preferences / Pod Matrix; (b) lets the PM glance at every relevant handle when deciding whether to leave a `send` note on a row.
+
+Sourcing for each entry:
+
+- **Team members** — for each row's `recommended_assignee`, resolve the Slack handle from the Pod Matrix (`references/pod-matrix.md` carries handles alongside names and Orbit user_ids). If a delegate is not in the matrix, fall back to `slack_search_users` against the delegate's canonical email at render time; cache the resolved handle for the run.
+- **AMs** — for each AM matched to a row's project, read the `Slack handle` field from the Preferences AM entry. Missing field renders as `(no handle — Notion draft only)`.
+
+Block shape:
+
+```
+─────────────────────────────────
+## Slack handles for today (reference for executor + PM)
+
+Team:
+  • Vijay Patel — @vijaypatel
+  • Atul Mehra — @atulmehra
+  • Hitesh Asnani — (no handle — Notion draft only)
+
+AMs:
+  • Caitlin Sims — @caitlins
+  • Ellen Thomas — (no handle — Notion draft only)
+```
+
+The block uses a Divider + Heading-2 anchor (`Slack handles for today (reference for executor + PM)`) for same-day rerun idempotency, exactly like the Pod Daily Task and AM Daily Ping blocks. On Mode 1 rerun, find the anchor and replace the body in place.
+
+This block is purely a reference — the writer never reads back from it. The executor reads from it as a fallback when `slack_search_users` returns no match (preferring the pre-resolved handle to a runtime search).
+
+If a row carries zero potential Slack send targets (priority-lane row where the delegate is not in the matrix AND has no canonical email match, plus the AM has no handle), the block omits that row entirely. If every row falls into that case, skip the block — log `slack_handles_block_empty` to the Run Log.
+
+## Flow — Mode 2 PM self-summary callout (end of Mode 2)
+
+After every row is processed and per-row Handoff drafts are appended, write a single Notion **callout block** at the very top of today's dated page summarizing the Mode 2 run. This replaces what used to be a Slack DM to the PM. The PM is already opening Notion to review approved rows — the summary lives where their eyes are.
+
+Block format:
+
+- Callout block with icon `✅` if every approved row executed successfully, `⚠️` if one or more failed.
+- First line: `Mode 2 ran at <HH:MM IST>. <N> approved, <K> executed, <F> failed, <S> skipped.`
+- If priority-lane rows existed, second line: `Priority lane: <N_priority> sub-tasks created under AM-handed parents.`
+- Third line (only if F > 0): `Failures: <one-line per failure with row title + reason>.`
+- Last line: link to today's dated page (self-reference is fine — the callout anchors the PM's eye).
+
+Position: AT THE TOP of today's dated page, ABOVE the `Ready for Execution` toggle. PM sees it the moment they open the page.
+
+Idempotency: on a same-day Mode 2 rerun, find any prior summary callout (first block on the page if it carries the `✅` or `⚠️` icon AND opens with `Mode 2 ran at`) and replace it in place. Do not stack callouts.
 
 ## Flow — appending the Pod Daily Task block (end of Mode 2)
 
-After all rows are processed and the per-row `Slack draft (copy to send)` blocks are written, append a **single Pod Daily Task block** to today's dated page. The PM copies this whole block in one shot and pastes it into the pod's daily task Slack channel.
+After the Mode 2 summary callout is written and the per-row `Handoff draft (copy + paste)` blocks are appended, append a **single Pod Daily Task block** to today's dated page. The PM copies this whole block in one shot and pastes it into whatever channel they use for daily team delivery (direct message, email, in-person, etc.).
 
 **Placement:** at the very bottom of the dated page, BELOW the inline Morning Queue database. Never above it, never inside the database, never on the row detail pages.
 
@@ -137,7 +184,7 @@ The block has two parts: a fixed **anchor** (skill-managed, supports rerun detec
 Pull the **Pod Daily Task Block** section from the cached Preferences page (already loaded in Mode 2 Step 1). Read every field:
 
 - `pod_daily_task_enabled` (bool) — if `false`, skip the entire flow, no run-log entry needed.
-- `pod_daily_task_slack_channel` (string, reference only — never used to send).
+- `pod_daily_task_destination` (string, reference only — free-text reminder of where the PM pastes the block; never used to send).
 - `caption_template` (string).
 - `date_label_template` (string).
 - `task_heading_template` (string).
@@ -188,7 +235,7 @@ Emit blocks in this order. The anchor is fixed and never reads from the DSL.
 **Anchor (always emitted, in this order, NEVER customizable):**
 
 1. **Divider block** — separates the digest from the morning queue database above.
-2. **Heading-2 block** — plain text exactly `Pod Daily Task — copy into Slack`. This text is the rerun match key. Do not let any template or DSL override it.
+2. **Heading-2 block** — plain text exactly `Pod Daily Task — copy + paste`. This text is the rerun match key. Do not let any template or DSL override it.
 
 **Body (rendered from the parsed `pod_block_layout` tree):**
 
@@ -202,8 +249,8 @@ The default layout produces, for a 3-task day on 11 May 2026:
 
 ```
 ─────────────────────────────────
-## Pod Daily Task — copy into Slack
-Copy everything inside the date toggle below and paste into the pod's daily task Slack channel. Each line is one task you assigned today.
+## Pod Daily Task — copy + paste
+Copy everything inside the date toggle below and paste into your pod's daily task channel (set the destination in Preferences to whatever you use). Each line is one task you assigned today.
 
 ▼ 11/05/2026
   ## Wick MarketingWick Marketing PHP Upgrade16315
@@ -218,7 +265,7 @@ Copy everything inside the date toggle below and paste into the pod's daily task
 
 ### Step 6 — Idempotency
 
-**Block-level (rerun same day).** If today's dated page already has a `Pod Daily Task — copy into Slack` Heading-2 anchor from a prior Mode 2 fire:
+**Block-level (rerun same day).** If today's dated page already has a `Pod Daily Task — copy + paste` Heading-2 anchor from a prior Mode 2 fire:
 - Find the anchor (the Heading-2 with that exact plain-text).
 - Treat every block between the anchor and the next anchor (or the end of the page) as the digest's body. Delete those body blocks.
 - Re-emit the body from the freshly-parsed layout. The anchor (Divider + Heading-2) stays in place — do not delete or recreate it.
@@ -282,18 +329,18 @@ For each AM in the grouped set:
    - PM tone samples from Preferences (for voice calibration).
 4. Receive a 3-line draft body. This becomes the value of `{{am_ping_body}}` for this AM in the loop iteration.
 
-**Plain-language enforcement.** The AM ping body passes through the same 4th-5th grade English screen as team Slack drafts ONLY for AMs marked in Preferences as needing it. By default, AM pings stay in normal professional English (per `executors/slack.md` AM messages section). The drafting call should pass an `audience: am` flag so the plain-language writer skips the simplification pass.
+**Plain-language enforcement.** The AM ping body passes through the same 4th-5th grade English screen as team handoff drafts ONLY for AMs marked in Preferences as needing it. By default, AM pings stay in normal professional English. The drafting call should pass an `audience: am` flag so the plain-language writer skips the simplification pass.
 
 ### Step 5 — Resolve the per-AM token map
 
-Build the AM token map: `{am_name}`, `{am_first_name}`, `{am_last_name}`, `{am_slack_handle}`, `{am_email}` from Preferences, `{am_tasks_count}` and `{am_projects_csv}` from the grouped row set. Add the run's date token map for blocks outside the loop.
+Build the AM token map: `{am_name}`, `{am_first_name}`, `{am_last_name}`, `{am_email}` from Preferences, `{am_tasks_count}` and `{am_projects_csv}` from the grouped row set. Add the run's date token map for blocks outside the loop.
 
 ### Step 6 — Emit blocks: anchor first, then body
 
 **Anchor (always emitted when at least one AM qualifies, NEVER customizable):**
 
 1. **Divider block.**
-2. **Heading-2 block** — plain text exactly `AM Ping Drafts — copy into Slack`. This is the rerun match key.
+2. **Heading-2 block** — plain text exactly `AM Ping Drafts — copy + paste`. This is the rerun match key.
 
 **Body** — walk the parsed `am_block_layout` tree depth-first, same rules as Pod Daily Task layout. When the walker enters a `for_each_am:` sub-tree, iterate over the grouped AMs in alphabetical order; for each, emit the sub-tree with AM tokens and `{{am_ping_body}}` bound to that AM's draft.
 
@@ -301,7 +348,7 @@ The default layout produces, for a 2-AM day:
 
 ```
 ─────────────────────────────────
-## AM Ping Drafts — copy into Slack
+## AM Ping Drafts — copy + paste
 One short ping per AM, wrapping today's work on their projects. DM each AM at their handle below. The skill never auto-sends these — copy and send yourself.
 
 ### Sarah Chen (@sarahc)
@@ -317,7 +364,7 @@ Ping me if priorities shift.
 
 ### Step 7 — Idempotency
 
-**Block-level (rerun same day).** Same pattern as Pod Daily Task. Match by the anchor's exact Heading-2 plain-text `AM Ping Drafts — copy into Slack`. Find the anchor, delete every block between it and the next anchor (or end of page), re-emit the body from the freshly-parsed layout. Anchor stays in place.
+**Block-level (rerun same day).** Same pattern as Pod Daily Task. Match by the anchor's exact Heading-2 plain-text `AM Ping Drafts — copy + paste`. Find the anchor, delete every block between it and the next anchor (or end of page), re-emit the body from the freshly-parsed layout. Anchor stays in place.
 
 **Body regeneration on rerun.** The 3-line ping body is re-drafted on every Mode 2 fire because the underlying rows may have changed. No tick-state to preserve here (AM pings are paragraphs, not to-dos).
 
@@ -369,12 +416,12 @@ Use `notion-update-page` with `command: update_content` and targeted find-and-re
 
 | Failure | Behavior |
 |---|---|
-| Page creation fails | Retry once. If fails, abort Mode 1 with Slack to PM: `Couldn't write today's morning queue. [error]` |
+| Page creation fails | Retry once. If fails, abort Mode 1 with sent email to PM: `Couldn't write today's morning queue. [error]` |
 | Database creation fails | Retry once. If fails, abort. |
 | Row creation fails for a single item | Log in AI Notes on the summary block, continue with remaining rows |
 | Block reorder fails during archival | Log and continue. Order drift can be corrected on the next fire. |
 | `notion-move-pages` fails during archival sub-page reorder (Run Log / Incidents / Preferences) | Log and continue. |
-| Year or Month toggle creation fails | Retry once. If still fails, abort Mode 1 with Slack to PM: `Couldn't create the Year/Month toggle block. [error]` — do NOT fall back to creating the dated page flat at the parent body level. |
+| Year or Month toggle creation fails | Retry once. If still fails, abort Mode 1 with sent email to PM: `Couldn't create the Year/Month toggle block. [error]` — do NOT fall back to creating the dated page flat at the parent body level. |
 | Pod Daily Task block append fails | Log to run-log. Continue. Append `Pod Daily Task block failed to render — see run-log.` to the PM self-summary. Do not abort Mode 2. |
 | AM Daily Ping block append fails | Log to run-log. Continue. Append `AM Ping Drafts block failed to render — see run-log.` to the PM self-summary. Do not abort Mode 2. |
 | Per-AM draft generation fails | Render a placeholder paragraph for that AM (`Couldn't draft ping for {am_name} on this run — try rerunning Mode 2 or write manually.`). Continue with remaining AMs. |

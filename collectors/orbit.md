@@ -1,4 +1,4 @@
-> **This collector uses ONLY the Orbit MCP. Source allowlist — primary collection: Orbit, Gmail, Slack, Fathom, Notion. Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever — including any that may seem relevant to a specific signal.**
+> **This collector uses ONLY the Orbit MCP. Source allowlist — primary collection: Orbit, Gmail, Fathom, Notion (Slack forbidden). Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever — including any that may seem relevant to a specific signal.**
 
 > **Preflight (`preflight.md`) must have run before this collector is invoked. Do not call any tool until preflight has completed.**
 
@@ -8,9 +8,103 @@
 
 Pull overnight signals from Orbit that are relevant to the PM's projects. Return a structured list of signals ready for `synthesis/matcher.md`.
 
-## MANDATORY tool call sequence — no shortcuts
+This collector runs in **two passes** during Mode 1:
 
-This block overrides any inferred "fast path" the runtime might take. Mode 1 MUST invoke the following Orbit MCP tools in this exact order on every run. Skipping any of them is a Mode 1 failure and the assertion in `modes/mode-1-morning-collection.md` will abort the run.
+- **Pass A — Priority pass** (Mode 1 Step 3a, sequential, blocking). Narrow scope: parent tasks an AM created or reassigned to the running PM overnight, `due_date = today`. Output goes into a separate `priority_signals` list. See `## Priority Pass (Mode 1 Step 3a)` below.
+- **Pass B — Normal pass** (Mode 1 Step 3b, parallel with Gmail + Fathom). Broad scope: activity log + overdue + new tasks + status changes + new comments + attachments since `last_run_timestamp`. Output goes into the normal `orbit_signals` list. Behaves as documented in the original sections of this file.
+
+Mode 2 invokes neither pass — execution reads the morning queue from Notion, not from a fresh Orbit pull.
+
+## Priority Pass (Mode 1 Step 3a)
+
+This pass runs FIRST in Mode 1, before any other collector. It produces the `priority_signals` list that lands in the top-of-queue priority lane. Triggered when Mode 1 invokes the collector with `priority_pass = true`.
+
+### What it detects
+
+Parent tasks where ALL of the following hold:
+
+1. `assignee_id == PM_user_id` (the parent task is currently on the PM's plate)
+2. `due_date == today` (in IST)
+3. EITHER `created_by_id ∈ AM_user_ids` AND `created_at >= last_run_timestamp` (an AM created a new task and put it on PM directly during the lookback window)
+4. OR an `assignee_change` event exists with `timestamp >= last_run_timestamp`, `new_assignee_id == PM_user_id`, AND `actor_id ∈ AM_user_ids` (an AM reassigned an existing parent task to the PM during the lookback window)
+
+These are tasks the PM did not pick up themselves. The PM is the current assignee because an AM handed it to them, and the AM wants delegation work done today. The skill's job: surface the task at the top of the queue, suggest a delegate via the existing `synthesis/matcher.md` Job 6 4-branch tree (history → matrix availability → floater → cross-matrix Uncertain), and propose a sub-task **nested under this specific parent**.
+
+### AM identity resolution
+
+At the start of the priority pass:
+
+1. Read the Account Managers section of the Preferences page (already loaded by preflight Step 4). Extract canonical email + aliases for each AM.
+2. Call `list_users` once (the call is already cached for the run by `references/pod-matrix.md`, so this is a free lookup). For each AM, find the Orbit `user_id` whose email matches the AM canonical email or any alias.
+3. Build `AM_user_ids = [ids of resolved AMs]`. Cache on the collector run state.
+
+Edge cases:
+
+- **Preferences has zero AMs configured.** Log `priority_pass_no_ams_configured` to Run Log. Return an empty `priority_signals` list. Mode 1 still proceeds — the normal Orbit pass + Gmail + Fathom run as usual.
+- **An AM identity does not resolve to an Orbit user.** Log `priority_pass_am_unresolved: <am_name>` to Run Log and continue with the AMs that did resolve. Do not abort.
+- **AM canonical email matches multiple Orbit users.** Log `priority_pass_am_ambiguous: <am_name>` and use the first match. The PM can disambiguate by editing the AM email in Preferences (a unique alias).
+
+### Tool sequence
+
+For the priority pass only (the normal-pass mandatory sequence still applies separately):
+
+1. **`list_users`** — already called once per run (cached by `references/pod-matrix.md`). Reuse the cache.
+2. **`get_project_task_list`** with `due_date_filter: "today"` AND `assignee_id == PM_user_id` — run once per project in the PM's universe (owner + follower + active-in-last-6-months, same scope as the normal pass). Returns the small set of today's-due tasks currently on the PM's plate.
+3. **`get_activity_log`** — already called in the normal pass with `from_date = last_run_timestamp`. The priority pass reuses the same response. For each candidate task from step 2, cross-reference the activity log to confirm: (a) `created_by_id ∈ AM_user_ids` AND `created_at >= last_run_timestamp`, OR (b) an `assignee_change` entry exists for this task with `new_assignee_id == PM`, `actor_id ∈ AM`, and `timestamp >= last_run_timestamp`.
+4. **`get_task_details`** — called per surviving candidate to enrich the priority signal with the full parent task body (so the matcher can render the proposed sub-task brief without an extra fetch later).
+
+Tool budget for the priority pass: ≤ 2 extra MCP calls per project (`get_project_task_list` + `get_task_details` on the typically-tiny survivor set). The cached `list_users` and activity log are free. On a typical morning where most projects have zero today's-due tasks on PM's plate, only a handful of `get_task_details` calls fire.
+
+### Output shape — per priority signal
+
+```
+{
+  "source": "orbit",
+  "signal_type": "am_handed_to_pm_overnight_due_today",
+  "event_kind": "created" | "reassigned",
+  "project_id": <int>,
+  "project_title": <string>,
+  "project_url": <string>,
+  "client_name": <string>,
+  "sub_client_name": <string or null>,
+  "account_manager": <string>,
+  "project_owner": <string>,
+  "parent_task_id": <int>,
+  "parent_task_title": <string>,
+  "parent_task_url": <string>,
+  "parent_task_body": <string — full body, for matcher to derive sub-task brief>,
+  "parent_task_due_date": <ISO date — should equal today>,
+  "am_actor_id": <int>,
+  "am_actor_name": <string>,
+  "am_actor_email": <string>,
+  "event_timestamp": <ISO datetime>,
+  "bypass_pm_action_filter": true,
+  "raw_source_data": <full source object>,
+  "citation": {
+    "type": "orbit",
+    "label": "Orbit task #<parent_task_id> (handed to you by <am_actor_name>)",
+    "url": <parent_task_url>
+  }
+}
+```
+
+Two fields are load-bearing for downstream matcher logic:
+
+- `bypass_pm_action_filter: true` — instructs `synthesis/matcher.md` to skip the PM-action drop rule (SKILL.md non-negotiable #19) for this signal. An AM-handed task is pending delegation even if the PM commented or acknowledged it overnight.
+- `parent_task_id` — instructs `synthesis/matcher.md` Job 5 to PIN the proposed sub-task under this exact parent rather than inferring a parent from PM-owned tasks. Executors then create the sub-task in Orbit under this parent.
+
+### What the priority pass does NOT do
+
+- Does not pick the delegated assignee. PM did not choose one (the parent task sits with the PM, not a delegate). Assignee suggestion runs in `synthesis/matcher.md` Job 6 via the existing 4-branch tree — same logic as any other Create-subtask row.
+- Does not call `get_user_workload`. That's reserved for Job 6's no-history fallback path.
+- Does not run in Mode 2. Mode 2 reads the morning queue from Notion, not Orbit.
+- Does not double-emit signals into the normal pass. A task surfaced as a priority signal is excluded from the normal pass's `new_task` signal type (deduplicate by `task_id`).
+
+---
+
+## MANDATORY tool call sequence — no shortcuts (Normal pass)
+
+This block overrides any inferred "fast path" the runtime might take. Mode 1's normal pass MUST invoke the following Orbit MCP tools in this exact order on every run. Skipping any of them is a Mode 1 failure and the assertion in `modes/mode-1-morning-collection.md` will abort the run. The Priority Pass above runs FIRST (sequentially) and reuses the activity-log and `list_users` results emitted by this normal-pass sequence; the two passes share tool calls, they do not duplicate them.
 
 1. `get_user_details` — PM identity + assigned projects list.
 2. `list_projects` filtered by `project_owner_id` — owned-project enrichment.

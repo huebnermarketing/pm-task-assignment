@@ -1,6 +1,6 @@
 # connector-failure-notify.md — Failure Fallback Chain
 
-> **When any MCP connector in the primary allowlist fails (Orbit, Gmail, Slack, Fathom, Notion), the skill records and surfaces the failure through this fallback chain. Routines fire unattended, so each tier is fire-and-forget — no tier waits for human input. Read-only reference MCPs (Google Drive/Docs/Sheets, SharePoint per `references/external-doc-access.md`) follow the same retry-with-backoff policy but their failures are non-blocking — they degrade row context but never abort a run.**
+> **When any MCP connector in the primary allowlist fails (Orbit, Gmail, Fathom, Notion), the skill records and surfaces the failure through this fallback chain. Slack is outbound-send only (team-handoff + AM-ping per Mode 2) and failures of the Slack executor route through the same chain. Routines fire unattended, so each tier is fire-and-forget — no tier waits for human input. Read-only reference MCPs (Google Drive/Docs/Sheets, SharePoint per `references/external-doc-access.md`) follow the same retry-with-backoff policy but their failures are non-blocking — they degrade row context but never abort a run.**
 
 ## When this fires
 
@@ -25,7 +25,7 @@ Most MCP failures are transient — a cold-start delay, a brief rate-limit, a ne
 
 ### Per-run safety cap
 
-If 3+ distinct connector calls in the same routine fire each enter retry loops, abort the run early — that pattern almost always indicates a broader outage rather than per-connector flake. Log `early_abort=outage_suspected` on the run-log entry and trigger fallback chain Tier 1 + Tier 2 (Slack PM + email PM) with the full list of connectors that hit retry loops. Do not continue executing the rest of the routine logic.
+If 3+ distinct connector calls in the same routine fire each enter retry loops, abort the run early — that pattern almost always indicates a broader outage rather than per-connector flake. Log `early_abort=outage_suspected` on the run-log entry and trigger fallback chain Tier 1 + Tier 2 (email PM + Notion red callout) with the full list of connectors that hit retry loops. Do not continue executing the rest of the routine logic.
 
 ### Logging during retry
 
@@ -41,63 +41,35 @@ For a non-retryable error (no retry attempted), the same line records `1/4 attem
 
 Only after retry exhaustion (or a non-retryable error) does the fallback chain below begin. A successful retry mid-loop returns control to the calling step as if the original call had succeeded — the fallback chain is not invoked at all.
 
-## The 4-tier fallback chain
+## The 3-tier fallback chain
 
 Tiers below fire only AFTER the retry policy above has exhausted (or been skipped due to a non-retryable error). The skill tries each tier in order. If a tier itself fails (because the connector for that tier is also down), it falls to the next tier.
 
-### Tier 1 — Slack DM to the PM themselves
+### Tier 1 — Email from the PM's Gmail to themselves (sent, not drafted)
 
-The PM's Slack identity is in Preferences. Send a DM with:
-
-- Specific connector that failed
-- The error message (verbatim if available)
-- The remediation step (re-authenticate the MCP, etc.)
-- Time of failure
-- What the skill did or didn't do as a result
-
-Template:
-
-```
-🚨 PM Task Assignment — Connector Failure
-
-Connector: Fathom
-Time: 25 April 2026, 9:32 AM IST
-Error: MCP server disconnected
-What this means: I couldn't pull yesterday's meeting action items into your morning queue.
-What I did: I built the queue without Fathom signals. Today's queue is missing meeting-derived items.
-What you need to do: Re-authenticate the Fathom MCP. The next scheduled routine fire will pick it back up automatically; or run `PM Task Assignment, run morning` to re-collect immediately.
-```
-
-If the Slack DM succeeds, stop here. Done. (The failure is also written to the Run Log and the Incidents page — see Tier 4.)
-
-### Tier 2 — Email from the PM's Gmail to themselves (sent, not drafted)
-
-Used when Slack is the failed connector OR Slack is otherwise unreachable.
-
-The PM's Gmail account sends an email TO themselves (their canonical email or any alias). This is a **sent** email, not a draft — it lands in their inbox like a normal incoming message. This is one of the three documented exceptions where the Email Executor sends rather than drafts.
+The PM's Gmail account sends an email TO themselves (their canonical email or any alias). This is a **sent** email, not a draft — it lands in their inbox like a normal incoming message. This is one of the documented exceptions where the Email Executor sends rather than drafts (see `executors/email.md`).
 
 Template:
 
 ```
 Subject: 🚨 PM Task Assignment — Connector Failure
 
-Connector: Slack
+Connector: Fathom
 Time: 25 April 2026, 9:32 AM IST
-Error: [error message]
+Error: MCP server disconnected
 
-What this means: [explanation of impact]
-What I did: [what the skill did or didn't do]
-What you need to do: [remediation step]
+What this means: I couldn't pull yesterday's meeting action items into your morning queue.
+What I did: I built the queue without Fathom signals. Today's queue is missing meeting-derived items.
+What you need to do: Re-authenticate the Fathom MCP. The next scheduled routine fire will pick it back up automatically; or run `PM Task Assignment, run morning` to re-collect immediately.
 
 — PM Task Assignment skill
-(I'm sending this to you because Slack wasn't reachable for the standard notification.)
 ```
 
-If the email succeeds, stop here. Done. Tier 3 still runs as a redundant Notion-side trace; Tier 4 always runs.
+If the email succeeds, stop here. Done. (The failure is also written to the Run Log and the Incidents page — see Tier 3.) Tier 2 still runs as a redundant Notion-side trace when the failure occurred on today's Mode 1 / Mode 2 dated page; Tier 3 always runs.
 
-### Tier 3 — Bold-red callout on today's dated Notion page
+### Tier 2 — Bold-red callout on today's dated Notion page
 
-Used when both Slack and Gmail are unreachable.
+Used when Gmail itself is the failed connector OR Gmail is unreachable. Also runs as a redundant secondary trace any time the PM is likely to open Notion before checking their inbox (Mode 1 / Mode 2 failures, where Notion is the PM's primary view of the morning).
 
 If today's dated page exists, prepend a callout block to the very top of the page:
 
@@ -106,14 +78,14 @@ If today's dated page exists, prepend a callout block to the very top of the pag
 
 [Connector] is not responding. [Brief impact and remediation step].
 
-You couldn't be reached via Slack or email automatically. Please fix this connector before relying on tomorrow's run.
+You may not have received the email notification for this. Please fix the connector before relying on tomorrow's run.
 ```
 
 The callout uses red color formatting if Notion supports it, plus a 🚨 emoji and bold text for visibility.
 
 If today's dated page doesn't exist yet (e.g., Mode 1 was the run that failed before writing it), create a minimal page titled with today's date that contains only this callout.
 
-### Tier 4 — Incidents page on Notion parent
+### Tier 3 — Incidents page on Notion parent
 
 Used as a last resort, AND always used in addition to the above tiers as a safety net. This is the routine-friendly replacement for "surface at next manual invocation" — routines have no manual invocation, so the trace lives on Notion where the next fire (and the PM) can read it.
 
@@ -129,10 +101,10 @@ Append an incident row to a dedicated `Incidents` sub-page on the Notion parent.
 
 The next routine fire reads this page in **preflight Step 6** (immediately after the Run Log check) and surfaces every unresolved incident in its run-log entry, so post-mortems and trend-spotting are in one place.
 
-**Repeat-failure escalation:** if 3+ consecutive runs hit the same incident (same connector, same error class, all unresolved), escalate via Slack to the configured backup — NOT the PM. Assume the PM's Slack may itself be the failing connector or that the PM is unreachable. Backup escalation message:
+**Repeat-failure escalation:** if 3+ consecutive runs hit the same incident (same connector, same error class, all unresolved), escalate via **email** to the configured backup (the one configured in Preferences Escalation Backup section) — NOT the PM. Assume the PM's email may itself be the failing connector or that the PM is unreachable. Backup escalation message:
 
 ```
-🚨 PM Task Assignment — repeat connector failure
+Subject: 🚨 PM Task Assignment — repeat connector failure for [PM name]
 
 Connector: [name]
 Failures: [N] consecutive routine fires
@@ -141,47 +113,50 @@ Last seen: [timestamp]
 Latest error: [message]
 
 The PM may not have seen prior alerts. Please check on them or the connector.
+
+— PM Task Assignment skill
+(Automated message on behalf of [PM name])
 ```
 
-Once a successful fire writes to that connector again, mark all matching incident rows `resolved = true` and reset the consecutive-failure counter.
+Sent via `executors/email.md` (operational send exception). Once a successful fire writes to that connector again, mark all matching incident rows `resolved = true` and reset the consecutive-failure counter.
 
 ## Behavior matrix
 
-| Failed connector | Tier 1 (Slack) | Tier 2 (Email) | Tier 3 (Notion) | Tier 4 (Incidents page) |
-|---|---|---|---|---|
-| Orbit | works | works | works | always |
-| Gmail | works | tier 2 also fails — skip | works | always |
-| Slack | tier 1 fails — skip | works | works | always |
-| Fathom | works | works | works | always |
-| Notion | works | works | tier 3 also fails — skip | tier 4 also fails — record in run-log only |
-| All MCPs except Claude | tier 1 fails | tier 2 fails | tier 3 fails | tier 4 fails — run-log entry is the only trace; backup-escalation Slack also blocked |
+| Failed connector | Tier 1 (Email) | Tier 2 (Notion) | Tier 3 (Incidents page) |
+|---|---|---|---|
+| Orbit | works | works | always |
+| Gmail | tier 1 fails — skip | works | always |
+| Fathom | works | works | always |
+| Notion | works | tier 2 also fails — skip | tier 3 also fails — record in run-log only |
+| Slack (outbound-send executor) | works | works | always |
+| All MCPs except Claude | tier 1 fails | tier 2 fails | tier 3 fails — run-log entry is the only trace; backup-escalation email also blocked |
 
-The "always" column for Tier 4 is the safety net. Even if all other tiers succeed, Tier 4 still records the incident on the Notion parent so the next routine fire — which has no memory of this fire — can surface it. This is how a stateless routine system maintains visibility across fires.
+The "always" column for Tier 3 is the safety net. Even if all other tiers succeed, Tier 3 still records the incident on the Notion parent so the next routine fire — which has no memory of this fire — can surface it. This is how a stateless routine system maintains visibility across fires.
 
 ## Aggregation when multiple connectors fail in one run
 
 If preflight or a single run detects multiple connector failures, do not send multiple separate notifications. Aggregate into one:
 
 ```
-🚨 PM Task Assignment — Multiple Connector Failures
+Subject: 🚨 PM Task Assignment — Multiple Connector Failures
 
-2 of 5 connectors failed at 9:32 AM IST today:
+2 of 4 connectors failed at 9:32 AM IST today:
   • Fathom — MCP server disconnected
-  • Slack — auth expired
+  • Orbit — auth expired
 
-What this means: today's morning queue is missing meeting and Slack signals.
-What you need to do: re-authenticate Fathom and Slack. The next scheduled routine fire will pick them back up automatically.
+What this means: today's morning queue is missing Fathom and Orbit signals.
+What you need to do: re-authenticate Fathom and Orbit. The next scheduled routine fire will pick them back up automatically.
 ```
 
-One Slack DM (or email, or Notion note, or Incidents-page entry) summarizing all failures. One Run Log line per failure (so the per-connector audit trail stays granular even when the PM-facing message is aggregated).
+One email (or Notion callout, or Incidents-page entry) summarizing all failures. One Run Log line per failure (so the per-connector audit trail stays granular even when the PM-facing message is aggregated).
 
 ## Rate limiting
 
-If the same connector has failed in 3 of the last 5 routine fires (read from the Run Log + Incidents page during preflight), escalate the next routine's Tier 1 / Tier 4 messages to leadership-flagged tone:
+If the same connector has failed in 3 of the last 5 routine fires (read from the Run Log + Incidents page during preflight), escalate the next routine's Tier 1 / Tier 3 messages to leadership-flagged tone:
 
 > "⚠️ This connector has failed repeatedly. Please prioritize fixing it — the skill is partially blind without it."
 
-This complements the 3-consecutive-failure backup escalation in Tier 4. The "3 of last 5" rule is for non-consecutive but persistent flake; the consecutive rule is for sustained outage.
+This complements the 3-consecutive-failure backup escalation in Tier 3. The "3 of last 5" rule is for non-consecutive but persistent flake; the consecutive rule is for sustained outage.
 
 ## Run-log integration
 
@@ -194,12 +169,12 @@ Every connector failure also appends a line to the run-log detail page for the c
 Examples:
 
 ```
-Fathom failed at Mode 1 / Step 3 (collector) after 4/4 attempts — MCP server disconnected — fallback tier: 1
-Slack failed at Mode 2 / Step 9 (PM completion DM) after 4/4 attempts — auth expired (final) — fallback tier: 2
-Notion failed at Mode 1 / Step 5 (writer) after 1/4 attempts (retry_skipped: 403 permission denied) — fallback tier: 4
+Fathom failed at Mode 1 / Step 3b (collector) after 4/4 attempts — MCP server disconnected — fallback tier: 1
+Slack failed at Mode 2 / Step 6 (team-handoff send executor) after 4/4 attempts — auth expired (final) — fallback tier: 1
+Notion failed at Mode 1 / Step 5 (writer) after 1/4 attempts (retry_skipped: 403 permission denied) — fallback tier: 3
 ```
 
-`writers/run-log.md` reads these lines from the per-run failure list and renders them in the run's decision-trace detail page. `[N]` is the highest tier that successfully recorded the failure (1 if Slack DM landed; 4 if everything except the Incidents-page write failed).
+`writers/run-log.md` reads these lines from the per-run failure list and renders them in the run's decision-trace detail page. `[N]` is the highest tier that successfully recorded the failure (1 if the email landed; 3 if everything except the Incidents-page write failed).
 
 ## Self-test
 

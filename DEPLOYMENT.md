@@ -7,7 +7,7 @@ For each PM you deploy this skill to:
 1. Copy the entire `PM Automation MVP 1` folder
 2. Edit `config.md` — replace 2 fields with the new PM's Notion page
 3. (Optional) Edit `config.md` — set the new PM's name and email for clarity
-4. Send the edited folder to the PM (Slack, Orbit, email, USB drive, however)
+4. Send the edited folder to the PM (chat app, Orbit, email, USB drive, however)
 5. The PM installs the folder in their Cowork skills directory
 6. The PM runs `PM Task Assignment, run morning` — first-run setup kicks in
 
@@ -52,7 +52,7 @@ With the actual PM's name and primary email. This is optional — the skill will
 
 Choose any delivery method:
 
-- Zip the folder and Slack it
+- Zip the folder and share via a chat app
 - Attach to an Orbit task
 - Email the zip
 - Hand-deliver via USB
@@ -78,7 +78,7 @@ The PM types `PM Task Assignment, run morning`. Because their Notion parent does
 5. Escalation backup (options-based, list of WLIQ team members)
 6. Account managers (one per AM)
 7. Default email preferences
-8. Default Slack preferences
+8. Default handoff tone preferences
 9. Always-include rules (free text)
 10. Tone samples (skippable)
 

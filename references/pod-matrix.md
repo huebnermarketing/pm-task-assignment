@@ -1,6 +1,6 @@
 > **MANDATORY: `preflight.md` must run before any logic in this file. Do not call any tool, do not act on user input, until preflight has completed successfully. This includes routine triggers — preflight runs even when invoked by a scheduled cloud routine.**
 
-> **Source allowlist:** Primary collection — Orbit, Gmail, Slack, Fathom, Notion. Read-only references on demand — Google Drive/Docs/Sheets, SharePoint (see `external-doc-access.md`). The Pod Matrix Notion page (this file's subject) is also read-only — see "Notion scope exception" below. No other MCP, ever.
+> **Source allowlist:** Primary collection — Orbit, Gmail, Fathom, Notion. Read-only references on demand — Google Drive/Docs/Sheets, SharePoint (see `external-doc-access.md`). The Pod Matrix Notion page (this file's subject) is also read-only — see "Notion scope exception" below. No other MCP, ever — Slack is explicitly forbidden.
 
 # Reference — Pod Matrix (read-only)
 
@@ -97,6 +97,18 @@ For each non-skipped matrix member, resolve to an Orbit `user_id`:
 4. **Disambiguation when multiple Orbit users share the matrix name** — prefer the one whose Orbit `department` aligns with the matrix role for that row. Example: "Atul" appears in Matrix A's `WordPress / PHP` row → match the Atul whose Orbit department is `WordPress / PHP`, not a different Atul in another department.
 5. **Still ambiguous** — drop the name from candidates, surface in Run Log Decisions as `name-ambiguous: <name> in <matrix> (<role row>)`.
 6. **Not found in Orbit** — drop, surface as `name-unresolved: <name> in <matrix>`. Common cause: new joiner whose Orbit user has not been provisioned yet, or a contractor not in Orbit.
+
+## Slack handle resolution (optional)
+
+In addition to the Orbit `user_id`, the loader attempts to resolve a Slack handle for each matrix member. This is consumed by `writers/notion.md` when rendering the Slack handles reference block on the dated page, and by `executors/slack.md` as a fallback when `slack_search_users` returns no match for a team-handoff send.
+
+Resolution order per member:
+
+1. If the Matrix Detail page rows include a Slack handle in parentheses (e.g., `Vijay Salvi (@vijaysalvi)`), use that handle as-is.
+2. Otherwise, call `slack_search_users` with the member's Orbit canonical email at render time (Mode 1 only) and cache the resolved handle on the matrix member record for the run.
+3. If neither resolves, leave the handle field null. The Notion reference block renders `(no handle — Notion draft only)` and the executor falls back to a Notion draft if a `send` note + audience=team row points at this member.
+
+The Slack handle is **not** load-bearing for any pod-inference logic — pod-inference only consumes Orbit `user_id`, role, familiarity, and availability. The handle is purely for outbound-send routing in Mode 2. Missing handles never block Mode 1.
 
 ### Cross-matrix duplicates — known list
 

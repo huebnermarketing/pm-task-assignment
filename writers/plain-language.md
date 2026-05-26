@@ -14,13 +14,13 @@ This rule applies ONLY to content read by the India delivery team. PMs, AMs, and
 
 | Content | Language rule |
 |---|---|
-| Slack handoff messages to team members | Plain-language (4th-5th grade) |
+| Handoff drafts to team members (the row's `Proposed Handoff` section + Outcome-block draft) | Plain-language (4th-5th grade) |
 | Orbit task body (all 6 sections) | Plain-language (4th-5th grade) |
 | Orbit task comments the team will read | Plain-language (4th-5th grade) |
-| Slack handoff titles / subjects | Plain-language |
+| Handoff titles / subjects | Plain-language |
 | Email TO the delivery team (rare) | Plain-language |
 | **Emails to clients or AMs** | **Normal professional English** |
-| **Slack to AMs or leadership** | **Normal professional English** |
+| **AM Ping Drafts (per-AM Notion block)** | **Normal professional English** |
 | **Summary column in Morning Queue (PM reads)** | **Normal professional English** |
 | **Proposed Email section of row detail (PM reviews)** | **Normal professional English** |
 | **Internal documentation** | **Normal English** |
@@ -116,7 +116,7 @@ When simplifying, identify terms that should be preserved:
 
 ## Emoji policy (applies to ALL output, not just team-facing)
 
-Use emojis sparingly and only when they aid scanning or carry mandated structural meaning. Decorative or emotional emojis are forbidden in every output the skill writes — Slack handoffs, Orbit task bodies, email drafts, Notion content, Run Log entries, completion summaries, escalation pings.
+Use emojis sparingly and only when they aid scanning or carry mandated structural meaning. Decorative or emotional emojis are forbidden in every output the skill writes — handoff drafts, Orbit task bodies, email drafts, Notion content, Run Log entries, completion summaries, escalation pings.
 
 ### Allowed (professional / structural only)
 
@@ -148,7 +148,7 @@ Default to no emoji. The skill writes for India delivery teams + AMs + clients �
 
 ### Short notes / titles
 
-For titles and one-liners, prioritize clarity over grade-level strictness. A Slack handoff title like "Fix hero image bug" is fine — it's already plain. Don't over-simplify short strings.
+For titles and one-liners, prioritize clarity over grade-level strictness. A handoff title like "Fix hero image bug" is fine — it's already plain. Don't over-simplify short strings.
 
 ### Numbers and dates
 
@@ -157,7 +157,7 @@ Use specific numbers (`3`, `12`), specific dates (`30 April 2026`), specific tim
 ### Greetings and closings
 
 - Greetings: `Hey [name]` or `Hi [name]` — warm, short.
-- Closings: Drop formal closings for internal team Slack. An occasional `Thanks` is fine. No `Best regards` or `Sincerely`.
+- Closings: Drop formal closings for internal team handoffs. An occasional `Thanks` is fine. No `Best regards` or `Sincerely`.
 
 ## What this writer does NOT do
 

@@ -56,11 +56,11 @@ The structure of the Preferences page is defined in `schemas/preferences-page.md
 
 ## Source allowlist
 
-> **Primary sources (collection):** Orbit, Gmail, Slack, Fathom, Notion.
+> **Primary sources (collection):** Orbit, Gmail, Fathom, Notion.
 >
 > **On-demand read-only references** (used only when an allowed primary signal links to a file there): Google Drive, Google Docs, Google Sheets, SharePoint. Read-only — never write. See `references/external-doc-access.md` for trigger conditions.
 >
-> **Any other MCP is forbidden** — including any added to the user's Cowork after installation, including any that the running user explicitly asks the skill to use.
+> **Any other MCP is forbidden — including Slack** — and including any added to the user's Cowork after installation, and any that the running user explicitly asks the skill to use.
 >
 > **This rule applies even under experimental scope, forced runs, sandbox runs, or any kind of override.** If a signal seems relevant from a forbidden source, ignore it.
 
@@ -72,7 +72,7 @@ This rule is repeated in SKILL.md and at the top of every collector / executor f
 
 The running user's identity is determined from Preferences (after first-run setup completes).
 
-- **Identity check on every invocation:** the skill matches the authenticated Slack profile and Gmail account against the canonical email AND any aliases listed in Preferences. If any one matches, identity is confirmed.
+- **Identity check on every invocation:** the skill matches the authenticated Gmail account against the canonical email AND any aliases listed in Preferences. If any one matches, identity is confirmed.
 - The canonical email and aliases are stored in Preferences, populated during first-run setup (`first-run-setup.md`).
 - Many WLIQ team members have email aliases (e.g., `ishant@whitelabeliq.com` is an alias for `ishantk@whitelabeliq.com`). The skill treats canonical and aliases as the same identity for sender classification, recipient matching, and self-notification.
 
@@ -82,14 +82,13 @@ The running user's identity is determined from Preferences (after first-run setu
 
 If any MCP connector fails or returns auth errors, the skill notifies the running PM about the failure. Fallback chain in order:
 
-1. **Slack DM to the PM themselves.** Primary channel.
-2. **Email from the PM's Gmail to themselves (sent, not drafted).** Used if Slack is the failed connector or otherwise unreachable.
-3. **Bold-red callout at the top of today's dated Notion page.** Used if both Slack and Gmail are unreachable.
-4. **Surface at the start of the PM's next manual invocation.** The very first thing the skill says when next invoked is: "Heads up — last [run/escalation] failed because [reason]. Fix this before proceeding: [remediation step]."
+1. **Email from the PM's Gmail to themselves (sent, not drafted).** Primary push notification — lands in the PM's inbox.
+2. **Bold-red callout at the top of today's dated Notion page.** Used if Gmail is unreachable. PM sees it when they open the morning queue.
+3. **Incidents sub-page on the Notion parent.** Always written (audit trail). If a connector fails on 3+ consecutive routine fires, this tier escalates an email to the configured backup person.
 
 Defined in `connector-failure-notify.md`.
 
-The skill **must** trigger this fallback chain whenever Orbit, Gmail, Slack, Fathom, or Notion return errors. The skill **must not** silently fail or proceed without notifying the PM.
+The skill **must** trigger this fallback chain whenever Orbit, Gmail, Fathom, or Notion return errors. The skill **must not** silently fail or proceed without notifying the PM.
 
 ---
 

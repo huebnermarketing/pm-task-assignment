@@ -38,7 +38,7 @@ The database is **brief by design**. Counts and statuses live here; reasoning li
 - `OK` — all sources reachable, no per-item errors, run completed normally.
 - `Partial` — run completed but at least one source failed or at least one item errored. Detail page lists what.
 - `Failed` — run aborted before completion. Detail page captures whatever was reached.
-- `Escalated` — connector-failure tier reached the "notify PM via Slack" threshold (per `connector-failure-notify.md`). Detail page links the Slack message.
+- `Escalated` — connector-failure tier 3 reached the "3+ consecutive unresolved incidents" threshold (per `connector-failure-notify.md`). Detail page captures the email sent to the backup person.
 
 ---
 
@@ -68,7 +68,7 @@ Views beyond the default are nice-to-have; the writer creates only the default v
 - **Only `writers/run-log.md` writes to this database.** No other writer, mode, or tool appends rows. This is enforced by convention; the writer file holds the single Notion call that creates the row.
 - **Append-only.** Existing rows are never edited. If a routine retries, a new row is appended with a `(retry-N)` suffix on `Run ID` (see writer for idempotency rules).
 - **Each row links to exactly one detail page** via the `Detail` column. The detail page is created **before** the row is appended, so the link is never null.
-- **No row, no run.** If the writer itself fails (Notion outage), the writer falls back to a Slack DM with the run summary as a code block — the trace is never silently dropped.
+- **No row, no run.** If the writer itself fails (Notion outage), the writer falls back to a sent email to the PM with the run summary as a code block — the trace is never silently dropped.
 
 ---
 

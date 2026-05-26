@@ -16,7 +16,7 @@ Every entry into the skill:
 
 - Open `config.md` and read every section.
 - Confirm `DEFAULT_NOTION_PARENT_PAGE_ID` is set to a real Notion page ID (32-char hex string with or without dashes).
-- Confirm the source allowlist clause is loaded into context: primary collection — Orbit, Gmail, Slack, Fathom, Notion; read-only references on demand — Google Drive/Docs/Sheets, SharePoint per `references/external-doc-access.md`.
+- Confirm the source allowlist clause is loaded into context: primary collection — Orbit, Gmail, Fathom, Notion; Slack is outbound-send only (Mode 2 team-handoff + AM-ping with explicit PM `send` note — see `executors/slack.md`) and is never used for collection; read-only references on demand — Google Drive/Docs/Sheets, SharePoint per `references/external-doc-access.md`.
 - Confirm the Preferences-must-be-respected clause is loaded.
 - **Set the in-memory flag `is_interactive`.** `true` if the skill was triggered by a human-typed message in a Claude session (Claude Desktop manual command); `false` if the trigger is a routine / cron / SDK invocation. Mode files read this flag to decide whether to ask one clarifying question per ambiguous item or to fall straight to `Uncertain:`. See `ENVIRONMENTS.md`.
 
@@ -32,7 +32,7 @@ If `config.md` cannot be read or the page ID is missing/malformed, abort the run
 
 - Search the parent's children for a sub-page titled exactly `Preferences`.
 - **If Preferences does NOT exist:**
-  - **ABORT the run.** Routines cannot run interactive setup. Slack the PM (identity from routine config): `Preferences page is missing on the Notion parent — setup is incomplete. Duplicate the template per setup-template.md and create the Preferences sub-page before next routine fire.` Then exit. Do NOT route to first-run-setup.md from a routine.
+  - **ABORT the run.** Routines cannot run interactive setup. Email the PM (identity from routine config; sent, not drafted): subject `[PM Task Assignment] Preferences page missing — setup incomplete`, body `Preferences page is missing on the Notion parent — setup is incomplete. Duplicate the template per setup-template.md and create the Preferences sub-page before next routine fire.` Then exit. Do NOT route to first-run-setup.md from a routine.
 
 - **If Preferences DOES exist:** continue to step 4.
 
@@ -42,25 +42,24 @@ Read the Preferences sub-page (per `schemas/preferences-page.md`). Confirm the r
 
 - Identity (name, Orbit user ID, canonical email, email aliases if any)
 - Run schedule (morning run time, execution run time)
-- Escalation backup (name, channel, time)
-- Account managers (at least one, with email or Slack handle)
+- Escalation backup (name, email, time)
+- Account managers (at least one, with canonical email and any aliases — the AM identity list is also consumed by the Mode 1 Step 3a Orbit-first priority pass)
 - Communication defaults
 - Internal state fields (last_morning_run, last_execution_run — may be null if first ever run)
 
 If any **required** field is missing from a Preferences page that exists:
 
-- Slack the user themselves: "Your Preferences page is incomplete — [field] is missing. Please run `PM Task Assignment, change my preference: ...` to fix, or re-run first-run setup."
+- Email the user themselves (sent, not drafted): "Your Preferences page is incomplete — [field] is missing. Please run `PM Task Assignment, change my preference: ...` to fix, or re-run first-run setup."
 - ABORT the current run.
 
-### Step 5 — Verify the 5 MCP connectors are responsive
+### Step 5 — Verify the 4 MCP connectors are responsive
 
-For each of the 5 allowlisted MCPs, run a lightweight ping (a read-only call that should succeed quickly):
+For each of the 4 allowlisted MCPs, run a lightweight ping (a read-only call that should succeed quickly):
 
 | MCP | Verification call |
 |---|---|
 | Orbit | `get_user_details` for the PM (identity check from Preferences) |
 | Gmail | `gmail_get_profile` |
-| Slack | `slack_read_user_profile` |
 | Fathom | `list_meetings` with the smallest date range possible |
 | Notion | `notion-fetch` of the parent page (already done in step 2 — reuse) |
 
@@ -73,7 +72,7 @@ For each MCP that fails:
 
 After the verification:
 
-- **If all 5 MCPs are responsive:** continue to the original mode/command logic. Preflight done.
+- **If all 4 MCPs are responsive:** continue to the original mode/command logic. Preflight done.
 - **If 1+ MCPs are down:** the failure-notify flow has been triggered. Decision per mode:
   - Mode 1 (collection): proceed with the available collectors. Note the missing source on the dated page summary. Don't abort.
   - Mode 2 (execution): if Notion or Orbit are down, ABORT — they're load-bearing. Other MCPs are non-blocking; proceed with what's available.
@@ -96,17 +95,16 @@ After creation/verification, the bottom three `child_page` blocks on the parent 
 - Does NOT execute any morning collection logic, executor logic, or write any task data. That happens after preflight returns control.
 - Does NOT modify Preferences.
 - Does NOT modify config.
-- Does NOT call any tool from outside the source allowlist (5 primary MCPs + 4 read-only reference MCPs per `references/external-doc-access.md` + the read-only Pod Matrix exception per `references/pod-matrix.md`).
+- Does NOT call any tool from outside the source allowlist (4 primary MCPs + 4 read-only reference MCPs per `references/external-doc-access.md` + the read-only Pod Matrix exception per `references/pod-matrix.md`).
 - Does NOT fetch the Pod Matrix page. That is fetched by `modes/mode-1-morning-collection.md` Step 2.5 via `references/pod-matrix.md` (cached for the run). Mode 2 and Monthly Archival never fetch it.
 
 ## Identity check (also part of preflight, in step 5)
 
-When verifying the Slack and Gmail connectors, the skill confirms identity:
+When verifying the Gmail connector, the skill confirms identity:
 
-- Slack profile email or username should match Preferences canonical email or one of the aliases.
 - Gmail authenticated account should match Preferences canonical email or one of the aliases.
 
-If neither matches, ABORT the run. Slack the PM: `Identity mismatch — connector authed as [X] but Preferences expects [Y]. Routine cannot proceed.` In routines the connectors are wired at create-time; mismatch means the routine was created on the wrong account. Do not proceed silently.
+If it does not match, ABORT the run. Email the PM (sent, not drafted): subject `[PM Task Assignment] Identity mismatch — routine cannot proceed`, body `Identity mismatch — Gmail connector authed as [X] but Preferences expects [Y]. Routine cannot proceed.` In routines the connectors are wired at create-time; mismatch means the routine was created on the wrong account. Do not proceed silently.
 
 ## Loading verification
 

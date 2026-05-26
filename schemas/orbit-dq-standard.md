@@ -106,7 +106,7 @@ Bulleted list. Three to six criteria. Specific, verifiable, unambiguous.
 
 Good:
 - All 12 revisions applied to the mockup
-- Preview link shared with Jane via Slack
+- Preview link shared with Jane (email or chat — PM picks the channel)
 - No console errors on mobile or desktop
 - Mannan signs off on QA
 
@@ -145,7 +145,7 @@ Not good:
 - Every section is present. If a section legitimately has nothing to say, still include the heading with a placeholder like `[None — reference the task title for context]` rather than omitting.
 - Keep sections tight. If DO or WHY run longer than two sentences, split the task — it's probably too big.
 - Keep formatting consistent within a single PM's tasks. The header style is set per-PM in Preferences (`orbit_task_header_style`); the executor reads it on every run and applies it uniformly. Section order is fixed regardless of style.
-- REFS always includes at least one actual link. If there are no relevant links, include a link to the originating signal (the email thread, the Slack message, the Fathom recording).
+- REFS always includes at least one actual link. If there are no relevant links, include a link to the originating signal (the email thread, the Orbit parent task, the Fathom recording).
 
 ## Example — full Orbit task body (`professional` style, default)
 
@@ -158,7 +158,7 @@ Not good:
 
 **DONE WHEN:**
   • All 12 revisions applied to the mockup
-  • Preview link shared with Jane via Slack
+  • Preview link shared with Jane (email or chat — PM picks the channel)
   • No console errors on mobile or desktop
   • Mannan signs off on QA
 

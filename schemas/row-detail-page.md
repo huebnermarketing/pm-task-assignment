@@ -51,9 +51,9 @@ For Flag rows, this section is replaced by:
 
 A short paragraph expanding the `pm_next_step` clause. What the PM should do, why, and any helper context (e.g., "Reply to Ellen on the Joe Warner thread; suggested devs given Joe framed the call as technical: <names from Orbit followers on #6994>"). Normal English.
 
-### H1: Proposed Slack Handoff (Create subtask rows ONLY)
+### H1: Proposed Handoff (Create subtask rows ONLY)
 
-The Slack message body Mode 2 will draft and append to the row's Outcome. Plain language, audience = team dev. Flag rows skip this section.
+The handoff body Mode 2 will draft and append to the row's Outcome on today's dated Notion page. Plain language, audience = team dev. The PM copies the rendered text and delivers it through whatever channel they use for that team member (in-person walk-through, email, chat app, etc.). Flag rows skip this section.
 
 ### H1: Sources
 
@@ -70,13 +70,6 @@ Full citation. Example:
 > **Excerpt:** "Hi Hiten, attached is our feedback on the homepage mockups. We'd love to get the revisions started ASAP..."
 > **Attachments:** `homepage_revision_feedback.pdf` (auto-extracted: 12 revisions — hero, navigation, footer, pricing)
 > [Open in Gmail](<url>)
-
-#### H2: Slack — #agency-x (if applicable)
-
-> **From:** Sarah Chen (AM)
-> **Date:** 24 April 2026, 6:15 PM IST
-> **Message:** "Hey Hiten — heads up, Jane from Agency X pinged me separately asking about the homepage. They're getting impatient. Can you prioritize this tomorrow morning?"
-> [Jump to message](<url>)
 
 #### H2: Orbit (if applicable)
 
@@ -169,7 +162,7 @@ The toggle stays closed by default. The PM never needs to open it. The skill rea
 ## Email — Gmail
 <full citation>
 
-## Slack — #channel
+## Fathom — call title
 <full citation>
 
 # Recommended Action
@@ -183,7 +176,7 @@ The toggle stays closed by default. The PM never needs to open it. The skill rea
 **SELF-QA:** ...
 **REFS:** ...
 
-# Proposed Slack Handoff
+# Proposed Handoff
 <plain-English handoff text>
 
 # Proposed Email

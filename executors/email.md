@@ -1,4 +1,4 @@
-> **This executor uses ONLY the Gmail MCP. Source allowlist — primary collection: Orbit, Gmail, Slack, Fathom, Notion. Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever.**
+> **This executor uses ONLY the Gmail MCP. Source allowlist — primary collection: Orbit, Gmail, Fathom, Notion. Slack is outbound-send only via `executors/slack.md` (team-handoff + AM-ping with explicit PM `send` note). Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever.**
 
 > **Preflight (`preflight.md`) must have run before this executor is invoked.**
 
@@ -16,8 +16,8 @@ Draft and optionally send emails on the PM's behalf via Gmail MCP. Default behav
 
 These are the only cases where this executor sends an email rather than saving it as a draft. Every other email is a draft.
 
-1. **Escalation email to the configured backup person** (from `modes/mode-2-execution.md` Step 3a, when the backup's preferred channel in Preferences is `email`). Internal, operational. Sent.
-2. **Self-notification on connector failure** (from `connector-failure-notify.md` Tier 2, when Slack is unreachable). The PM's Gmail sends an email TO themselves (canonical email or any alias) so they see the connector failure in their inbox. Sent.
+1. **Escalation email to the configured backup person** (from `modes/mode-2-execution.md` Step 3a). Backup channel is email-only — Slack is not an option for escalation. Internal, operational. Sent.
+2. **Self-notification on connector failure** (from `connector-failure-notify.md` Tier 1, the new primary tier of the 3-tier chain). The PM's Gmail sends an email TO themselves (canonical email or any alias) so they see the connector failure in their inbox. Sent.
 3. **PM note explicitly says "send"** (e.g., a PM Notes value like `send this to Caitlin now`). The matcher's note interpreter recognizes the explicit send instruction and the executor sends rather than drafts.
 
 Anything outside these three is always a draft. No fourth exception. Adding a new send case requires updating this file AND `executors/email.md`-aware modes/notes.
@@ -70,14 +70,14 @@ If sending is needed, use `mcp__...gmail.gmail_send_message` (or similar tool de
 - **Language:** normal professional English.
 - **Tone:** concise, direct — AMs appreciate brevity.
 - **Structure:** short context + what you need from them or what you're telling them.
-- **Default to Slack** unless Preferences says email is preferred for that specific AM.
+- **Default delivery is the Notion AM Daily Ping draft block** (PM copies and sends through whatever channel they use). Slack auto-send is available via `executors/slack.md` only when the PM leaves an explicit `send` note + audience=am on the row. Email is rare for AM communication.
 - Drafts only unless PM says send.
 
 ### Internal to PM's team (team member handoffs that go via email)
 
 - **Language:** plain-language 4th-5th grade English per `writers/plain-language.md`, because the delivery team reads this.
 - **Tone:** simple, direct, actionable.
-- Rare — team handoffs usually go via Slack, not email. Only email when the PM specifically requests it.
+- Rare — team handoffs default to a Notion draft block (PM copies + sends), with Slack auto-send available via `executors/slack.md` when the PM leaves an explicit `send` note + audience=team. Email is the third option, only when the PM specifically requests it.
 
 ### Operational / system (escalations, confirmations)
 

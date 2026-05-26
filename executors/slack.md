@@ -1,30 +1,31 @@
-> **This executor uses ONLY the Slack MCP (and the Notion MCP indirectly via `writers/notion.md` for draft append). Source allowlist — primary collection: Orbit, Gmail, Slack, Fathom, Notion. Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever.**
+> **This executor uses ONLY the Slack MCP, and only for outbound-send. Source allowlist — primary collection: Orbit, Gmail, Fathom, Notion. Slack is NOT a collection source (the Slack collector was removed) — this executor's sole purpose is to send 2 specific kinds of message via Slack when the PM explicitly opted in. Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever.**
 
 > **Preflight (`preflight.md`) must have run before this executor is invoked.**
 
-# Slack Executor
+# Slack Executor — outbound-send only
 
 ## Purpose
 
-Two real Slack-send paths the skill is allowed to take, plus a draft-into-Notion path that replaces all team / AM auto-sends:
+Slack is outbound-send only. The skill makes EXACTLY TWO kinds of Slack call, each gated by an explicit PM opt-in:
 
-1. **PM self-summary** — the Mode 2 completion recap sent to the PM themselves (operational, internal).
-2. **Escalation message** from Mode 2 Step 3a (sent to the configured backup if their channel is Slack).
-3. **Team handoff with explicit PM `send` instruction** — only when the row's PM Note explicitly says "send" AND audience = `team`. Never for AM, never for client.
+1. **Team handoff send** — Mode 2 sends a team handoff via Slack ONLY when the row's PM Note explicitly says `send` AND audience = `team`. Recipient is the row's resolved delegate (the matcher's `recommended_assignee`, or the PM's override via note).
+2. **AM ping send** — Mode 2 sends an AM ping via Slack ONLY when the row's PM Note explicitly says `send` AND audience = `am`. Recipient is the row's AM (matched to a Preferences AM entry).
 
-For team and AM rows that don't meet path 3, the executor does NOT call Slack at all. Instead it produces a draft body and hands it to `writers/notion.md` to append under the row's Outcome on today's dated page (see `Notion-appended drafts` below). The PM copies and sends it themselves.
+Without an explicit `send` note (or with an audience mismatch), the executor does NOT call Slack at all. The handoff/ping is rendered as a draft block by `writers/notion.md` and appended under the row's Outcome on today's dated page (see `Notion-appended drafts` below). The PM copies and sends it themselves through whatever channel they prefer.
+
+The skill explicitly does NOT use Slack for: PM self-summary (now a Notion callout block at the top of today's dated page), escalation backup ping (now email-only via `executors/email.md`), connector-failure tier 1 (now email-sent), client-facing messages (always Notion draft, PM sends manually). Slack is not a collection source either — the `collectors/slack.md` file was deleted.
 
 ## Rule
 
-**Team and AM Slack messages are never auto-sent unless path 3 above applies.** Drafts are appended to today's dated Notion page under the row's Outcome — the PM reads them there and copies into Slack on their own.
+**Team and AM handoffs default to Notion drafts.** The Slack send paths above are exceptions, only invoked when the PM has explicitly opted in via the PM Note. Drafts on Notion are the default and apply to every row that doesn't meet the explicit-send rule.
 
-Client-facing Slack messages (in Slack Connect channels with external clients) are never auto-sent. Always drafted to Notion. The PM owns the send.
+Client-facing communication is never auto-sent. Always drafted to Notion. The PM owns the send.
 
 ## Supported operations
 
-### Send a message (only the 3 paths above)
+### Send a message (only the 2 paths above)
 
-Use `mcp__...slack.slack_send_message`. Allowed only for: PM self-summary, escalation backup ping, and team-handoff rows with explicit `send` PM note.
+Use `mcp__...slack.slack_send_message`. Allowed only for: team-handoff rows with explicit `send` + audience=team, and AM-ping rows with explicit `send` + audience=am.
 
 Required parameters:
 - `channel` — channel ID, user DM ID, or channel name (resolve to ID)
@@ -35,23 +36,23 @@ Optional:
 
 ### Notion-appended drafts (default path for team / AM)
 
-For every team or AM row that the executor does NOT send via the rules above, build the message body using the PM's `Slack handoff template` from Preferences and hand the result to `writers/notion.md`. The writer appends a `Slack draft (copy to send)` block under the row's Outcome on today's dated page, including:
+For every team or AM row that the executor does NOT send via the rules above, build the message body using the PM's `Handoff template` from Preferences and hand the result to `writers/notion.md`. The writer appends a `Handoff draft (copy + paste)` block under the row's Outcome on today's dated page, including:
 
 - Audience tag (`Team`, `AM`, or `Client`)
-- Recipient name + Slack handle (so the PM can DM directly)
+- Recipient name + canonical email + optional Slack handle (so the PM can deliver through whatever channel they prefer)
 - The message body, in plain language per `writers/plain-language.md`
 
-No Slack API call happens for this path. The PM reads the draft on the dated page and copies it into Slack themselves.
+No Slack API call happens for this path. The PM reads the draft on the dated page and copies it through whatever delivery channel they use.
 
 ## Message content rules
 
 ### Team member handoff messages (drafts on Notion by default)
 
-How the PM's pod members get their morning's work — drafted to Notion under the row's Outcome, copied by the PM into Slack manually. Real Slack send only on the path-3 exception (explicit `send` note, audience = team).
+How the PM's pod members get their morning's work — drafted to Notion under the row's Outcome, copied by the PM and delivered through whatever channel they use (in-person, chat, email). Real Slack send only on the team-handoff exception (explicit `send` note, audience = team).
 
 - **Language:** plain-language 4th-5th grade English per `writers/plain-language.md`. Role-specific technical terms preserved.
 - **Tone:** simple, direct, warm but not casual. Short sentences.
-- **Template:** taken from the PM's `Slack handoff template` in Preferences. The default suggestion is documented there (and editable per PM):
+- **Template:** taken from the PM's `Handoff template` in Preferences. The default suggestion is documented there (and editable per PM):
 
 ```
 <project name / brief task title>
@@ -83,39 +84,29 @@ Context you need:
 Please log your hours.
 ```
 
-### AM messages (drafts on Notion only — never auto-sent)
+### AM messages (drafts on Notion by default; Slack send only on explicit opt-in)
 
-The skill never pings AMs automatically. Every AM-bound message is built here and handed to `writers/notion.md` for append under the row's Outcome.
+By default, the skill drafts AM messages to Notion. The Slack send path fires only when the PM left an explicit `send` note + audience = am on the row.
 
 - **Language:** normal professional English.
 - **Tone:** concise, confident.
 - **Length:** 1-3 lines max.
 
-Example body (the PM copies this from Notion into Slack on their own):
+Example body (default Notion draft; the PM copies and delivers however they choose):
 
 ```
 Agency X homepage revisions picked up today — Vijay is on it. Target: preview ready before the Thursday board meeting. Will keep you posted.
 ```
 
-### PM self-summary (post-Mode 2)
-
-- **Language:** normal English.
-- **Structure:** bullet list of actions taken / skipped / failed. See the template in `modes/mode-2-execution.md` step 9.
-
-### Escalation message (from Mode 2 Step 3a)
-
-- Template lives in `modes/mode-2-execution.md` Step 3a.3.
-- Sent to the backup person.
+When the PM opts into Slack send, the body is identical; the executor calls `slack_send_message` to the AM's Slack handle (resolved via Preferences `AM Slack handle` field) instead of leaving a draft on the dated page.
 
 ## Channel / DM resolution
 
-When the PM note or matched context specifies a recipient:
+When the PM note + audience match opts into a Slack send:
 
-- **Individual person** → DM them directly. Resolve the Slack user ID via `slack_search_users` with their name.
-- **AM** → DM. Use the handle from Preferences.
-- **Multiple people** → send one DM to each OR one group DM (pick group DM for same-team context).
-- **Project channel** → find by name. Channels usually match the Orbit client or project name with slight variations. Use `slack_search_channels`.
-- **Unknown recipient** → skip and log: `FAILED — couldn't find Slack handle for [name]. Check their Preferences or send manually.`
+- **Team member (audience = team)** → DM the delegate directly. Resolve the Slack user ID via `slack_search_users` against the delegate's canonical email (resolved from Pod Matrix / Orbit relationship map). The dated page's Slack-handles reference block (rendered by `writers/notion.md` near the morning queue DB) is the secondary lookup if the Slack search returns no match.
+- **AM (audience = am)** → DM the AM. Use the `AM Slack handle` from the Preferences AM entry. If the handle field is blank for that AM, fall back to a Notion draft for that row and log `am_handle_missing` to the Run Log; the PM will see the draft on the dated page and can copy + send manually.
+- **Unknown recipient** → skip the send and fall back to a Notion draft. Log: `FAILED — couldn't find Slack handle for [name]; draft appended for you to copy.`
 
 ## Slack formatting
 
@@ -144,19 +135,20 @@ Per `writers/source-citation.md`, documents that were read MUST be cited.
 ## After sending or drafting
 
 Return to Mode 2 with the outcome string for the row:
-- `Slack sent to [person]` — when path 1, 2, or 3 ran
-- `Slack draft appended to Notion page (audience: team — copy from today's queue page to send)`
-- `Slack draft appended to Notion page (audience: AM — copy from today's queue page to send)`
+- `Sent handoff to [person] on Slack (@handle) per your 'send' note` — when the team-handoff send path ran
+- `Sent AM ping to [AM name] on Slack (@handle) per your 'send' note` — when the AM-ping send path ran
+- `Handoff draft appended to Notion page (audience: team — copy + paste to send)` — default path
+- `Handoff draft appended to Notion page (audience: AM — copy + paste to send)` — default path
 
 ## Pod Daily Task block (end-of-Mode-2 digest)
 
-Separate from the per-row drafts above. After all rows are processed, Mode 2 Step 9a builds a single **Pod Daily Task** copy-block at the bottom of the dated page — a concatenated list of every sub-task created that day, formatted to be pasted directly into the pod's daily task Slack channel. This is **not** a Slack-API send; the executor does not touch Slack for the digest. The build itself is handed to `writers/notion.md` — Flow — appending the Pod Daily Task block. Configuration lives in `schemas/preferences-page.md` — Pod Daily Task Block.
+Separate from the per-row drafts above. After all rows are processed, Mode 2 Step 9a builds a single **Pod Daily Task** copy-block at the bottom of the dated page — a concatenated list of every sub-task created that day, formatted to be pasted directly into whatever channel the PM uses for pod-wide daily task delivery (their choice). This is **not** a Slack-API send; the executor does not touch Slack for the digest. The build itself is handed to `writers/notion.md` — Flow — appending the Pod Daily Task block. Configuration lives in `schemas/preferences-page.md` — Pod Daily Task Block.
 
 ## AM Daily Ping block (end-of-Mode-2 digest)
 
-A second end-of-Mode-2 copy-block sits directly below the Pod Daily Task block on the dated page. Mode 2 Step 9b builds **one 3-line ping per AM**, grouped by which projects each AM owns. This block is **never** Slack-API-sent — every line is a draft for the PM to copy into a Slack DM to that AM themselves.
+A second end-of-Mode-2 copy-block sits directly below the Pod Daily Task block on the dated page. Mode 2 Step 9b builds **one 3-line ping per AM**, grouped by which projects each AM owns. This block is **never** Slack-API-sent — every line is a draft for the PM to copy and deliver through whatever channel they use for that AM (DM, email, in-person, etc.).
 
-This complements (does not replace) the per-row AM drafts described above. Per-row drafts capture row-specific context under each row's Outcome on the dated page; the AM Daily Ping block is a single consolidated message per AM, ready to paste as a DM.
+This complements (does not replace) the per-row AM drafts described above. Per-row drafts capture row-specific context under each row's Outcome on the dated page; the AM Daily Ping block is a single consolidated message per AM, ready to paste.
 
 The per-AM 3-line body is drafted by `writers/plain-language.md` (called from `writers/notion.md` during the AM block build), not by this executor. This executor only documents the block's existence and the fact that no Slack API call ever fires for it. Configuration: `schemas/preferences-page.md` — AM Daily Ping Block. Build flow: `writers/notion.md` — Flow — appending the AM Daily Ping block.
 

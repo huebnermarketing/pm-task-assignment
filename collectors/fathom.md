@@ -1,4 +1,4 @@
-> **This collector uses ONLY the Fathom MCP. Source allowlist — primary collection: Orbit, Gmail, Slack, Fathom, Notion. Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever — including any that may seem relevant to a specific signal.**
+> **This collector uses ONLY the Fathom MCP. Source allowlist — primary collection: Orbit, Gmail, Fathom, Notion (Slack forbidden). Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever — including any that may seem relevant to a specific signal.**
 
 > **Preflight (`preflight.md`) must have run before this collector is invoked. Do not call any tool until preflight has completed.**
 
@@ -7,6 +7,8 @@
 ## Purpose
 
 Pull action items, commitments, decisions, and missed-meeting signals from the PM's Fathom meetings in the lookback window. Always include the Fathom recording link so the PM can watch if needed.
+
+**Dual role.** Fathom signals are NOT only standalone action-item signals. They also serve as **context enrichment** for Orbit signals — especially priority-lane signals from the Orbit collector's Priority Pass. A Fathom call where an AM discussed a parent task before handing it to the PM is exactly the backstory the PM needs to brief the delegate. To support this, every Fathom signal carries cross-link metadata that `synthesis/matcher.md` Job 4b uses to attach it to corroborating Orbit signals. See `## Context-link metadata` below.
 
 ## Scope
 
@@ -83,9 +85,26 @@ Non-negotiable. Every signal surfaced from a meeting has the recording URL. PMs 
     "url": <recording_url>,
     "meeting_id": <meeting_id>,
     "timestamp_reference": <string or null — if citing a specific moment in the recording>
+  },
+  "context_link": {
+    "project_id_candidates": [<int>, ...],
+    "actor_emails": [<string>, ...],
+    "topic_keywords": [<string>, ...],
+    "timestamp": <ISO datetime>
   }
 }
 ```
+
+## Context-link metadata
+
+Every Fathom signal carries a `context_link` object so `synthesis/matcher.md` Job 4b can attach it to corroborating Orbit signals (especially priority-lane). Population rules:
+
+- **`project_id_candidates`** — list of Orbit project IDs the meeting plausibly refers to. Resolution order: (1) the project's full name appearing in the meeting title or summary, (2) any external attendee email matching an Orbit `client_contacts` entry — emit that project's id, (3) topic keywords from the auto-extracted summary matching a substring of an Orbit project title.
+- **`actor_emails`** — every unique attendee email (excluding the PM's canonical + aliases). Used by Job 4b to detect AM-attended calls relevant to the priority lane.
+- **`topic_keywords`** — short list (≤ 8 entries) of significant nouns from the meeting title + summary. Simple stopword filtering, lowercase, deduplicated.
+- **`timestamp`** — ISO datetime of the meeting start. Used for Job 4b's ±24h time-proximity rule when matching against Orbit events.
+
+The collector populates `context_link` on EVERY Fathom signal regardless of whether the matcher actually links it later. The data is already extracted during normal collection.
 
 ## One meeting may produce multiple signals
 

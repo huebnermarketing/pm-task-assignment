@@ -1,6 +1,6 @@
 > **MANDATORY: `preflight.md` must run before any logic in this file. Do not call any tool, do not act on user input, until preflight has completed successfully. This includes scheduled-task triggers — preflight runs even when invoked by the scheduler.**
 
-> **Source allowlist:** Primary collection — Orbit, Gmail, Slack, Fathom, Notion. Read-only references on demand — Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever. The allowlist is enforced even under experimental scope or forced runs.
+> **Source allowlist:** Primary collection — Orbit, Gmail, Fathom, Notion (Slack forbidden). Read-only references on demand — Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever. The allowlist is enforced even under experimental scope or forced runs.
 
 # Note Interpreter
 
@@ -16,9 +16,9 @@ Take a short, free-form PM note from a Morning Queue row and resolve it into a c
   - Original recommended action
   - Original recommended assignee
   - Project
-  - Source signals (email, Slack, Orbit, Fathom)
+  - Source signals (email, Orbit, Fathom)
   - Proposed Orbit task body (pre-drafted)
-  - Proposed Slack handoff (pre-drafted)
+  - Proposed handoff (pre-drafted; copied + sent by PM through whatever channel they use)
   - Proposed email (pre-drafted if any)
 
 ## Output
@@ -29,8 +29,8 @@ A revised action plan:
 {
   "action_plan": [
     {
-      "type": "create_subtask" | "update_task" | "add_comment" | "change_due_date" | "send_slack" | "skip",
-      "executor": "orbit" | "email" | "slack" | "none",
+      "type": "create_subtask" | "update_task" | "add_comment" | "change_due_date" | "regenerate_handoff" | "skip",
+      "executor": "orbit" | "email" | "notion" | "none",
       "parameters": { ... },
       "why": <string — one-line justification tied to the note>
     }
@@ -56,12 +56,12 @@ If `confidence = low`, the executors do NOT run. Instead, the row's Outcome colu
 
 - If the original action involved sending an email, convert to draft
 - Email Executor creates a Gmail draft instead of sending
-- If the original action involved a Slack message, do NOT apply — Slack doesn't have drafts in the skill's scope
+- Team handoff drafts are already draft-only by default (PM copies + sends manually), so this note is a no-op for them
 
 ### "mark as high priority" / "mark urgent"
 
 - Set `severity_id` to Critical (15) or Important (16) in the Orbit task creation
-- Add to Slack handoff: "**Priority:** High"
+- Add to the handoff draft: "**Priority:** High"
 
 ### "split into two" / "split into X, Y" / "split this"
 
@@ -87,7 +87,7 @@ If `confidence = low`, the executors do NOT run. Instead, the row's Outcome colu
 ### "CC [person]" / "add [person] as CC" / "include [person]"
 
 - For email actions: add the person to CC
-- For Slack actions: @-mention the person in the message (or send a parallel message to them)
+- For team handoff drafts: name the person in the handoff body and add their email below the draft so the PM can include them when copying + sending
 - Look up the person in Preferences' AM list first, then the Orbit user list
 
 ### "remind me later" / "snooze"
@@ -127,7 +127,7 @@ The skill only asks for clarification in two cases:
 1. **The note is genuinely ambiguous.** Example: `assign this to the new person` — who's "the new person"?
 2. **The note contradicts itself.** Example: `mark urgent but save as draft` — urgency usually implies send.
 
-In those cases, set `confidence = low` and populate `clarification_needed` with a specific question. Mode 2 will leave the row untouched and include the question in the post-execution Slack summary.
+In those cases, set `confidence = low` and populate `clarification_needed` with a specific question. Mode 2 will leave the row untouched and include the question in the post-execution Notion callout summary at the top of today's dated page.
 
 ## What the interpreter does NOT do
 
@@ -154,10 +154,10 @@ In those cases, set `confidence = low` and populate `clarification_needed` with 
       "why": "PM overrode the assignee to Ravi based on Phase 1 codebase familiarity."
     },
     {
-      "type": "send_slack",
-      "executor": "slack",
+      "type": "regenerate_handoff",
+      "executor": "notion",
       "parameters": { "to": "Ravi", "message": "<regenerated plain-language handoff for Ravi>" },
-      "why": "Handoff message re-targeted to Ravi."
+      "why": "Handoff draft re-targeted to Ravi; appended under the row Outcome for PM to copy + send."
     }
   ],
   "confidence": "high",

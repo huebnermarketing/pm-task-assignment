@@ -33,7 +33,7 @@ Loads: `preflight.md`, then `modes/mode-2-execution.md`.
 Behavior:
 - Run preflight. Abort on failure.
 - Read today's dated page. If it doesn't exist, abort with "no morning queue for today — run morning first."
-- Check the `Ready for Execution` toggle. If ON, execute approved rows + rows with notes and Slack the PM the summary. If OFF, ask the operator: "Ready toggle is off. Flip it now and reply `go`, or reply `cancel`."
+- Check the `Ready for Execution` toggle. If ON, execute approved rows + rows with notes and write the completion summary as a Notion callout at the top of today's dated page. If OFF, ask the operator: "Ready toggle is off. Flip it now and reply `go`, or reply `cancel`."
 
 ### `PM Task Assignment, validate setup`
 

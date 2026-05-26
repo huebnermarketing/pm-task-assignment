@@ -31,7 +31,7 @@ Opening paragraph:
 | **Canonical email** | The PM's primary work email on `@whitelabeliq.com`. Example: `aditis@whitelabeliq.com`. |
 | **Email aliases** | A bulleted list of all alias addresses that map to this PM. Empty if none. Example: `- aditi@whitelabeliq.com`. |
 
-The skill matches the authenticated Slack profile / Gmail account against the canonical email AND any aliases. Any one match = identity confirmed.
+The skill matches the authenticated Gmail account against the canonical email AND any aliases. Any one match = identity confirmed.
 
 ### H2: Run Schedule
 
@@ -48,10 +48,8 @@ Plus a line about manual invocation:
 | Field | Description |
 |---|---|
 | **Name** | The backup person's full name |
-| **Channel** | `Slack` or `email` |
-| **Slack handle** | If channel = Slack, the @-handle |
-| **Email** | If channel = email, the email address |
-| **Notify time** | When to ping them (typically same as execution run time, or a configurable delay) |
+| **Email** | Email address (sent, not drafted) — the only escalation channel |
+| **Notify time** | When to email them (typically same as execution run time, or a configurable delay) |
 
 ### H2: Account Managers
 
@@ -59,10 +57,14 @@ One sub-section per AM. For each:
 
 #### H3: [AM name]
 
-- **Email:** [email]
-- **Slack:** @[handle]
-- **Preferred channel:** `Slack for quick handoffs, email for paper trail` / `Always Slack` / `Always email` / [custom]
+- **Canonical email:** [email]
+- **Email aliases:** bulleted list of any alias addresses for this AM. Empty if none.
+- **Slack handle:** `@[handle]` — optional. Populate only if you sometimes want the skill to auto-send an AM ping via Slack when you leave a row with PM Note = `send` + audience=am. If blank, AM-ping send falls back to a Notion draft block for the PM to copy and deliver manually.
 - **Projects (known associations):** list of Orbit project names — auto-updated as new projects surface in matcher's grouping
+
+The AM canonical email + aliases drive two things: (1) sender classification in collectors, and (2) the Mode 1 Step 3a Orbit-first priority pass — the skill resolves each AM canonical/alias to an Orbit user_id via `list_users` at run start, then filters Orbit `assignee_change` / `created_by` events for `actor_id ∈ AM_user_ids`. Keep this list accurate or the priority lane misses parent tasks the AM hands to the PM overnight.
+
+The Slack handle field is consumed only by `executors/slack.md` for the narrow outbound-send path (AM ping with explicit PM `send` note + audience=am). It is NOT used for collection — the Slack collector was removed.
 
 ### H2: Default Communication Preferences
 
@@ -71,8 +73,8 @@ A table:
 | Audience | Default Channel | Tone | Default CCs |
 |---|---|---|---|
 | Clients (external) | Email | Professional, warm | CC relevant AM |
-| Account Managers | Slack (or per-AM override above) | Concise, direct | — |
-| Team members (India) | Slack | Plain English (4th-5th grade), role-specific terms preserved | — |
+| Account Managers | Notion draft (PM copies + sends) | Concise, direct | — |
+| Team members (India) | Notion draft (PM copies + sends) | Plain English (4th-5th grade), role-specific terms preserved | — |
 | Leadership (Brian, Nishant) | Email | Formal, structured | Each other |
 
 Plus:
@@ -81,7 +83,7 @@ Plus:
 - **Orbit task body header style:** `professional` (default) | `emoji` — header glyphs used in the 6-section Orbit task body. See `schemas/orbit-dq-standard.md` for the full mapping. Section order and content are unchanged across styles; only the header glyph changes.
 - **Gmail post-collection action:** `none` (default) | `mark_read` | `apply_label` | `mark_read_and_apply_label` — what the Gmail collector does to a source message after it lands in the morning queue. See `collectors/gmail.md`.
 - **Gmail label name:** `pm-task-assignment/collected` (default) — only used when the post-collection action includes `apply_label`. The label is created in the PM's Gmail on first use if it does not exist.
-- **Slack handoff template:** the per-PM template body for team handoff drafts. The format is whatever the PM writes here; the executor does not impose its own structure beyond plain-language enforcement and source-citation rules. Default suggestion (the PM may edit freely):
+- **Handoff template:** the per-PM template body for team handoff drafts. The format is whatever the PM writes here; the writer does not impose its own structure beyond plain-language enforcement and source-citation rules. The rendered draft is appended to the row's Outcome block on today's dated Notion page; the PM copies and sends through whatever channel they prefer (direct message, in-person, email, etc.). Default suggestion (the PM may edit freely):
 
   ```
   <project name / brief task title>
@@ -95,15 +97,15 @@ Plus:
   Please log your hours.
   ```
 
-- **AM communication:** team and AM Slack messages are **never auto-sent** by the skill. Drafts are appended to the row's Outcome on today's dated Notion page after Mode 2 runs; the PM copies and sends from there. The only Slack sends Mode 2 may perform are: (a) the PM self-summary DM, (b) the escalation message to the backup, and (c) a team handoff explicitly approved with a PM note that says "send" AND audience = team.
+- **AM and team communication:** team and AM messages are **never auto-sent** by the skill. Drafts are appended to the row's Outcome on today's dated Notion page after Mode 2 runs; the PM copies and sends from there, through whatever channel they prefer. The only auto-sends the skill makes are: (a) connector-failure tier 1 email to the PM themselves, and (b) Mode 2 Step 3a escalation email to the configured backup when the Ready toggle was left off. Both are operational pings, not team or AM communication.
 
 ### H2: Pod Daily Task Block
 
-Controls the daily copy-block appended at the bottom of each dated page after Mode 2 — the one the PM copies into the pod's daily task Slack channel. See `writers/notion.md` — Flow — appending the Pod Daily Task block.
+Controls the daily copy-block appended at the bottom of each dated page after Mode 2 — the one the PM copies and pastes into whatever channel they use for pod-wide daily task delivery (direct messages, email distribution, in-person walk-throughs, etc.). See `writers/notion.md` — Flow — appending the Pod Daily Task block.
 
 The block is split into two parts:
 
-- **Anchor (skill-managed, not customizable):** the first two blocks the writer emits — a Divider and a Heading-2 with the exact text `Pod Daily Task — copy into Slack`. The anchor lets the writer find the existing block on a same-day rerun to refresh it. Renaming or removing the anchor breaks rerun idempotency.
+- **Anchor (skill-managed, not customizable):** the first two blocks the writer emits — a Divider and a Heading-2 with the exact text `Pod Daily Task — copy + paste`. The anchor lets the writer find the existing block on a same-day rerun to refresh it. Renaming or removing the anchor breaks rerun idempotency.
 - **Body (PM-customizable):** every block below the anchor. Defined by the `pod_block_layout` DSL field below. The DSL lets the PM choose block types, order, nesting, and which template fields each block uses.
 
 The skill reads every field on every Mode 2 run. Token substitution is literal — anything that isn't a recognized `{token}` is kept verbatim, including punctuation, whitespace, and emoji. Unrecognized tokens are left as-is in the output (so a typo in the template surfaces visibly in Notion). If a field is missing or empty on the Preferences page, the default below is used.
@@ -111,14 +113,14 @@ The skill reads every field on every Mode 2 run. Token substitution is literal �
 #### Behavior switches
 
 - **Pod daily task enabled:** `true` (default) | `false`. When `false`, Mode 2 skips the digest build entirely. The PM self-summary's closing line is omitted.
-- **Pod daily task Slack channel:** free-text reference, e.g., `#pod-daily-tasks`. The skill does NOT post here — this is a reminder for the PM about where to paste. Empty by default.
+- **Pod daily task destination:** free-text reminder for the PM about where to paste the block (e.g., `Email to dev@whitelabeliq.com`, `Print and pin on wall`, `In-person standup`). The skill does NOT post anywhere — this is a self-reminder, surfaced as a small caption above the block. Empty by default.
 
 #### Templates
 
 - **Caption template** — rendered as the paragraph between the H2 and the date toggle. No tokens. Default:
 
   ```
-  Copy everything inside the date toggle below and paste into the pod's daily task Slack channel. Each line is one task you assigned today.
+  Copy everything inside the date toggle below and paste into your pod's daily task channel (set the destination above to whatever you use). Each line is one task you assigned today.
   ```
 
 - **Date label template** — rendered as the title of the Heading-1 toggle wrapping the task list. Tokens: `{date_dd}`, `{date_mm}`, `{date_yyyy}`, `{date_month_name}`, `{date_iso}` (`YYYY-MM-DD`). Default:
@@ -135,7 +137,7 @@ The skill reads every field on every Mode 2 run. Token substitution is literal �
   {client}{project}{task_title}{task_id}
   ```
 
-  The no-space default intentionally mirrors Orbit's URL-preview concat in Slack — when the PM pastes the task URL on the next line, Slack renders the same string in its preview. If the PM prefers a readable form, try `{client} — {task_title} (#{task_id})`.
+  The no-space default intentionally mirrors Orbit's URL-preview concat in chat apps — when the PM pastes the task URL on the next line, link-preview-enabled apps render the same string in their preview. If the PM prefers a readable form, try `{client} — {task_title} (#{task_id})`.
 
 - **Task line template** — rendered as the to-do block body directly under each task heading. Tokens: `{orbit_task_url}`, `{assignee_first_name}`, `{assignee_full_name}`, `{task_id}`, `{task_title}`. Default:
 
@@ -143,7 +145,7 @@ The skill reads every field on every Mode 2 run. Token substitution is literal �
   {orbit_task_url} - {assignee_first_name}
   ```
 
-  Literal hyphen, single spaces. The full Orbit URL must be present in the rendered output — Slack renders it as a clickable link on paste.
+  Literal hyphen, single spaces. The full Orbit URL must be present in the rendered output — most chat/email clients render it as a clickable link on paste.
 
 #### Token reference
 
@@ -252,11 +254,11 @@ toggle_h1: {{date_label_template}}
 
 ### H2: AM Daily Ping Block
 
-Controls a second copy-block appended directly below the Pod Daily Task block on each dated page after Mode 2. One short ping per AM, drafted by the skill but **never auto-sent** — the PM DMs each AM manually.
+Controls a second copy-block appended directly below the Pod Daily Task block on each dated page after Mode 2. One short ping per AM, drafted by the skill but **never auto-sent** — the PM delivers each ping manually through whatever channel they use for that AM (direct message, email, in-person, etc.).
 
 Like Pod Daily Task, this block has a fixed anchor and a customizable body. The body is rendered from `am_block_layout` using the same DSL.
 
-- **Anchor (skill-managed, not customizable):** Divider + Heading-2 with the exact text `AM Ping Drafts — copy into Slack`. Anchor matters for same-day rerun detection.
+- **Anchor (skill-managed, not customizable):** Divider + Heading-2 with the exact text `AM Ping Drafts — copy + paste`. Anchor matters for same-day rerun detection.
 - **Body:** PM-defined layout, default = one Heading-3 per AM + one paragraph holding the 3-line ping body.
 
 The per-AM body is **drafted by the skill, not a pure template** — it summarizes the day's qualifying rows for that AM's projects through `writers/plain-language.md`, using PM tone samples. The PM controls the body shape via `am_ping_body_guidance` (free-text instructions the skill follows when drafting).
@@ -271,13 +273,13 @@ The per-AM body is **drafted by the skill, not a pure template** — it summariz
 - **AM ping caption template** — paragraph rendered above the per-AM list. No tokens. Default:
 
   ```
-  One short ping per AM, wrapping today's work on their projects. DM each AM at their handle below. The skill never auto-sends these — copy and send yourself.
+  One short ping per AM, wrapping today's work on their projects. Deliver each one through whatever channel you use for that AM. The skill never auto-sends these — copy and send yourself.
   ```
 
-- **AM heading template** — rendered as the per-AM heading block. Tokens: `{am_name}`, `{am_first_name}`, `{am_last_name}`, `{am_slack_handle}`, `{am_email}`. Default:
+- **AM heading template** — rendered as the per-AM heading block. Tokens: `{am_name}`, `{am_first_name}`, `{am_last_name}`, `{am_email}`. Default:
 
   ```
-  {am_name} (@{am_slack_handle})
+  {am_name} ({am_email})
   ```
 
 - **AM ping body guidance** — free-text instructions the skill follows when drafting the per-AM ping body. NOT a template (no token substitution applied to the guidance itself); it's prompt-style direction handed to `writers/plain-language.md` along with the row context for the AM's qualifying rows. Default:
@@ -299,8 +301,7 @@ The per-AM body is **drafted by the skill, not a pure template** — it summariz
 | `{am_name}` | AM's full name from the Account Managers section | Caption, AM heading |
 | `{am_first_name}` | AM's first name | AM heading |
 | `{am_last_name}` | AM's last name | AM heading |
-| `{am_slack_handle}` | AM's Slack handle from Preferences | AM heading |
-| `{am_email}` | AM's email | AM heading |
+| `{am_email}` | AM's canonical email | AM heading |
 | `{am_tasks_count}` | Number of qualifying tasks for this AM today | AM heading |
 | `{am_projects_csv}` | Comma-separated list of project names this AM owns that had work today | AM heading |
 
@@ -337,11 +338,11 @@ for_each_am:
 *PM wants a callout above with explicit reminder, plus the AM's projects listed under the heading:*
 
 ```
-callout: 📨 Copy each ping below into a DM to the AM. Do not auto-send.
+callout: 📨 Copy each ping below and deliver to the AM. Do not auto-send.
 for_each_am:
   heading_3: {am_name} — covers {am_projects_csv}
   paragraph: {{am_ping_body}}
-  paragraph: DM handle: @{am_slack_handle}
+  paragraph: Email: {am_email}
 ```
 
 **Validation behavior**
@@ -352,7 +353,7 @@ Same as Pod Daily Task layout — unknown block types skip with log, illegal nes
 
 A bulleted list of free-text rules the PM provided during setup. Examples:
 
-- Always remind assignees to log their hours at the end of their Slack handoff
+- Always remind assignees to log their hours at the end of their handoff draft
 - For WordPress work, always include the client's WP admin URL in the Orbit task
 - Never CC external clients on internal-facing threads
 - When assigning QA, always link the original task being QA'd
@@ -394,7 +395,7 @@ For the plain-language writer's calibration. Either:
 
 OR, when samples have been provided:
 
-> **Sample 1 (Slack to Vijay, 20 April 2026):**
+> **Sample 1 (Handoff to Vijay, 20 April 2026):**
 > [verbatim sample text]
 >
 > **Sample 2 (Email to Caitlin, 22 April 2026):**
@@ -430,7 +431,7 @@ The skill surfaces unacknowledged failures at the start of the PM's next manual 
 >
 > Examples:
 > - `PM Task Assignment, change my preference: run morning at 10:00 AM instead of 9:30`
-> - `PM Task Assignment, change my preference: my new escalation backup is Hiten, ping him on Slack at 11:00 AM`
+> - `PM Task Assignment, change my preference: my new escalation backup is Hiten, email him at hiten@whitelabeliq.com at 11:00 AM`
 > - `PM Task Assignment, change my preference: add a rule to always link related Orbit tasks when reassigning`"
 
 ## How the skill reads Preferences
