@@ -33,6 +33,7 @@ Email aliases listed in Preferences are treated as the same identity for both se
 
 - **Default lookback:** 12–18 hours (overnight)
 - **Extended lookback:** if Preferences' `last_morning_run` is older than 24 hours, lookback = (now − last_morning_run), capped at 7 days
+- **Monday override (IST):** if today is Monday, force `lookback = max(now − last_morning_run, 72 hours)`. Cron is weekday-only — Monday must always cover Fri/Sat/Sun even if a manual weekend run reset `last_morning_run`.
 
 ## What to pull
 

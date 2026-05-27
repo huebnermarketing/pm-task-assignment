@@ -33,6 +33,7 @@ Extract:
 
 - Default: 12 hours (to catch overnight signals).
 - If Preferences has a last-run timestamp: lookback = (now − last_run). This handles PM coming back from leave automatically.
+- **Monday override (IST):** if today is Monday, set `lookback = max(now − last_run, 72 hours)`. Cron is weekday-only, so the previous run was Friday — Monday must always capture the full Fri/Sat/Sun window even if a manual weekend run shrank `last_run`.
 - Cap lookback at 7 days to avoid overwhelming runs.
 
 ### Step 2.5 — Load Pod Matrix (cached for the run)
