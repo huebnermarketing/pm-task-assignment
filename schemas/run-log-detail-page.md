@@ -30,15 +30,17 @@ Example:
 
 ### 2. Sources section
 
-Heading: `Sources`. One bullet per collector, format `[name]: [count] signals, [status]`.
+Heading: `Sources`. One bullet per primary collector + one bullet for Fathom enrichment.
 
 ```
 - Orbit: 12 signals, OK
 - Gmail: 4 signals, OK
-- Fathom: 0 signals, OK
+- Fathom (enrichment): 2 fetched / 3 references / 1 unresolved, OK
 ```
 
-If a collector failed, the status is `FAILED — <one-line reason>`.
+Primary collector line format: `[name]: [count] signals, [status]`. Fathom line format: `Fathom (enrichment): [N fetched] / [M references detected] / [K unresolved], [status]`. The "references detected" count comes from matcher Job 4b Pass 2 trigger-phrase scanning; "fetched" is the subset where the enrichment service returned non-null; "unresolved" is the remainder (no matching meeting, or Fathom failure).
+
+If a primary collector failed, the status is `FAILED — <one-line reason>`. If Fathom failed, the status is `FAILED (non-blocking) — <one-line reason>`.
 
 ### 3. Decisions section
 
@@ -118,7 +120,7 @@ Two links, one bullet each:
 Sources
 - Orbit: 12 signals, OK
 - Gmail: 4 signals, OK
-- Fathom: 0 signals, OK
+- Fathom (enrichment): 0 fetched / 0 references / 0 unresolved, OK
 
 Decisions
 - Item 1 — Acme WP redesign, due Fri → assign-task → role-fit WP-dev, only WP-dev free in pod

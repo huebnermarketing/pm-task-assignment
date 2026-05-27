@@ -1,61 +1,67 @@
-> **This collector uses ONLY the Fathom MCP. Source allowlist — primary collection: Orbit, Gmail, Fathom, Notion (Slack forbidden). Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever — including any that may seem relevant to a specific signal.**
+> **This service uses ONLY the Fathom MCP. Source allowlist — primary collection: Orbit, Gmail, Notion (Slack forbidden; Fathom forbidden as standalone source). Enrichment-on-demand: Fathom (this file). Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever — including any that may seem relevant to a specific signal.**
 
-> **Preflight (`preflight.md`) must have run before this collector is invoked. Do not call any tool until preflight has completed.**
+> **Preflight (`preflight.md`) must have run before this service is invoked. Do not call any tool until preflight has completed.**
 
-# Fathom Collector
+# Fathom Enrichment Service
 
 ## Purpose
 
-Pull action items, commitments, decisions, and missed-meeting signals from the PM's Fathom meetings in the lookback window. Always include the Fathom recording link so the PM can watch if needed.
+Fetch meeting context **on-demand** when a primary signal (mail / Orbit) references a meeting. Fathom is **enrichment-only**: it never originates a row in the Morning Queue and is never invoked unless `synthesis/matcher.md` Job 4b requests enrichment for a specific primary signal.
 
-**Dual role.** Fathom signals are NOT only standalone action-item signals. They also serve as **context enrichment** for Orbit signals — especially priority-lane signals from the Orbit collector's Priority Pass. A Fathom call where an AM discussed a parent task before handing it to the PM is exactly the backstory the PM needs to brief the delegate. To support this, every Fathom signal carries cross-link metadata that `synthesis/matcher.md` Job 4b uses to attach it to corroborating Orbit signals. See `## Context-link metadata` below.
+This is a fundamental shift from earlier versions of this skill. Standalone Fathom signals — action items, missed-meeting alerts, decisions extracted from PM-attended meetings, internal commitments — are **not** surfaced unless a corresponding mail or Orbit signal exists. The matcher does the detection; this service responds.
 
-## Scope
+## When this service is invoked
 
-The PM's Fathom account. Meetings within the lookback window.
+`synthesis/matcher.md` Job 4b calls this service once per primary signal that contains a meeting reference. Matcher detects references via the trigger phrases below; this service does not scan signals itself.
 
-## Three meeting categories
+### Trigger phrases (matcher-side detection — documented here for cross-reference)
 
-### 1. Internal meetings
+A primary signal contains a meeting reference when ANY of the following appear in its body / subject / Orbit comment text:
 
-Team meetings, leadership syncs, internal discussions. Extract:
-- **Things asked of the PM** — tasks, updates, deliverables someone requested
-- **Things the PM committed to** — promises the PM made on the call
-- **Things expected of the PM** — implicit assignments discussed
+- Direct call-back: `"per our call"`, `"as discussed"`, `"in the meeting"`, `"on the call"`, `"during our sync"`, `"following our conversation"`, `"per the discussion"`, `"recap from <something>"`
+- Meeting-title cite: a known Fathom meeting title appears verbatim
+- Attendee cite: `"<attendee name> said"`, `"<attendee name> mentioned"`, `"<attendee name> agreed"`, `"<attendee name> committed to"`
+- Recording link: a `fathom.video/<id>` URL appears in the signal
+- Date+meeting reference: `"yesterday's call"`, `"Tuesday's meeting"`, `"Friday's sync"`, `"this morning's standup"`
 
-### 2. External / project meetings
+Matcher passes the detected reference plus the originating signal's context (project_id, actor_emails, timestamp) to this service.
 
-Meetings with clients, agencies, partners. Extract:
-- **Client requests** — anything the client asked for
-- **Client feedback** — what the client said during review/walkthrough
-- **Commitments made to the client** — deliverables promised on the call
-- **Decisions made** — scope, direction, timeline agreements
-- **Escalations or concerns raised** — issues the client flagged
-
-### 3. Missed meetings
-
-Meetings the PM was invited to but didn't attend (detected by: PM has the event on their calendar, the meeting has a Fathom recording from another attendee, but the PM isn't in the Fathom participant list).
-
-For missed meetings, the content is:
-- **A brief summary** — what was discussed, key decisions, action items
-- **Anything affecting the PM** — commitments made on their behalf, requests directed at them
-- **The recording link** — so they can watch if they need to
-
-## Every meeting includes the Fathom recording link
-
-Non-negotiable. Every signal surfaced from a meeting has the recording URL. PMs don't need to watch every recording, but the link must be present.
-
-## Output shape — per meeting
+## Interface
 
 ```
+fetch_enrichment(reference, signal_context) -> EnrichmentResult | null
+```
+
+**Input — `reference`:**
+```
 {
-  "source": "fathom",
-  "signal_type": "action_item_for_pm" | "action_item_for_team_member" | "client_request" | "client_commitment_made" | "decision_made" | "internal_expectation" | "escalation_raised" | "missed_meeting",
+  "trigger_phrase": <string — the matched text from the primary signal>,
+  "trigger_type": "direct_callback" | "meeting_title" | "attendee_cite" | "recording_link" | "date_reference",
+  "extracted_meeting_id": <string or null — populated only if trigger_type = "recording_link">,
+  "extracted_meeting_title": <string or null — populated if trigger_type = "meeting_title">,
+  "extracted_date_hint": <ISO date or null — populated if trigger_type = "date_reference">,
+  "extracted_attendee_name": <string or null — populated if trigger_type = "attendee_cite">
+}
+```
+
+**Input — `signal_context`:**
+```
+{
+  "primary_signal_id": <string>,
+  "primary_signal_source": "gmail" | "orbit",
+  "primary_signal_timestamp": <ISO datetime>,
+  "project_id_candidates": [<int>, ...],
+  "actor_emails": [<string>, ...]
+}
+```
+
+**Output — `EnrichmentResult` (or `null` if no matching meeting found):**
+```
+{
   "meeting_id": <string>,
   "meeting_title": <string>,
   "meeting_date": <ISO datetime>,
   "meeting_duration_minutes": <int>,
-  "meeting_type": "internal" | "external_client" | "external_partner" | "missed",
   "attendees": [
     {
       "name": <string>,
@@ -65,87 +71,77 @@ Non-negotiable. Every signal surfaced from a meeting has the recording URL. PMs 
     }
   ],
   "pm_attended": <bool>,
-  "fathom_summary": <string — the full auto-generated summary>,
-  "action_items_extracted": [
+  "summary_excerpt": <string — relevant 2-4 sentence slice of the auto-generated summary, scoped to the primary signal's project/actors>,
+  "relevant_action_items": [
     {
       "description": <string>,
       "assignee_name": <string or null>,
-      "timestamp_in_recording": <string or null>,
-      "is_for_pm": <bool>
+      "timestamp_in_recording": <string or null>
     }
   ],
-  "decisions_made": [<string>, ...],
-  "commitments_to_client": [<string>, ...],
   "recording_url": <string — always present>,
-  "full_transcript_available": <bool>,
-  "raw_source_data": <full meeting object>,
   "citation": {
     "type": "fathom",
     "label": "Fathom meeting: <meeting_title>, <date>",
     "url": <recording_url>,
     "meeting_id": <meeting_id>,
-    "timestamp_reference": <string or null — if citing a specific moment in the recording>
+    "timestamp_reference": <string or null — if a specific moment is being cited>
   },
-  "context_link": {
-    "project_id_candidates": [<int>, ...],
-    "actor_emails": [<string>, ...],
-    "topic_keywords": [<string>, ...],
-    "timestamp": <ISO datetime>
-  }
+  "match_confidence": "high" | "medium" | "low"
 }
 ```
 
-## Context-link metadata
+`relevant_action_items` is **scoped** — only action items whose text overlaps with the primary signal's project name, actor names, or topic keywords. The full action-item list is not returned; that would defeat the enrichment-only contract.
 
-Every Fathom signal carries a `context_link` object so `synthesis/matcher.md` Job 4b can attach it to corroborating Orbit signals (especially priority-lane). Population rules:
+## Lookup strategy
 
-- **`project_id_candidates`** — list of Orbit project IDs the meeting plausibly refers to. Resolution order: (1) the project's full name appearing in the meeting title or summary, (2) any external attendee email matching an Orbit `client_contacts` entry — emit that project's id, (3) topic keywords from the auto-extracted summary matching a substring of an Orbit project title.
-- **`actor_emails`** — every unique attendee email (excluding the PM's canonical + aliases). Used by Job 4b to detect AM-attended calls relevant to the priority lane.
-- **`topic_keywords`** — short list (≤ 8 entries) of significant nouns from the meeting title + summary. Simple stopword filtering, lowercase, deduplicated.
-- **`timestamp`** — ISO datetime of the meeting start. Used for Job 4b's ±24h time-proximity rule when matching against Orbit events.
+The service picks the cheapest tool call that satisfies the reference:
 
-The collector populates `context_link` on EVERY Fathom signal regardless of whether the matcher actually links it later. The data is already extracted during normal collection.
+| `trigger_type` | Strategy | Tool call |
+|---|---|---|
+| `recording_link` | Direct fetch by meeting ID | `fathom.get_summary(meeting_id)` |
+| `meeting_title` | Search by exact title within `signal_context.primary_signal_timestamp ± 14 days` | `fathom.search_meetings(title=..., date_range=...)` |
+| `attendee_cite` | Search by attendee name + date window | `fathom.search_meetings(attendee=..., date_range=...)` |
+| `direct_callback` | Search by `signal_context.actor_emails` as attendees + date window `[primary_signal_timestamp − 14 days, primary_signal_timestamp]` | `fathom.search_meetings(attendee_emails=..., date_range=...)` |
+| `date_reference` | Resolve the date hint to an actual date (e.g. "yesterday" → primary_signal_timestamp − 1 day), then search by `actor_emails` on that date | `fathom.search_meetings(attendee_emails=..., date=...)` |
 
-## One meeting may produce multiple signals
+If multiple meetings match, pick the one with highest overlap of `attendees ∩ signal_context.actor_emails`, ties broken by chronological proximity to `primary_signal_timestamp`. Return `match_confidence: "high"` if only one candidate, `"medium"` if disambiguation by overlap, `"low"` if disambiguation by timing only.
 
-A single 30-minute internal meeting that discussed Agency X, Agency Y, and Agency Z should split into three items — one per project. The matcher handles the split downstream, but the collector can emit multiple signals per meeting if the auto-extracted action items clearly split by topic.
+Only call `fathom.get_transcript` if the auto-generated summary clearly fails to cover the reference (rare — auto-summaries are usually sufficient for enrichment context).
+
+## Summary excerpt scoping
+
+Do not return the full Fathom summary. Extract a 2-4 sentence slice that mentions the primary signal's project, the actors involved, or the topic of the trigger phrase. If no such slice can be extracted with reasonable confidence, return the first 2-3 sentences of the summary and set `match_confidence: "low"`.
+
+This keeps Notion rows readable. A row enriched with 8 paragraphs of meeting summary defeats the plain-language rule.
 
 ## Tool calls
 
-- `mcp__...fathom.list_meetings` — list the PM's meetings in the lookback window.
-- `mcp__...fathom.search_meetings` — alternative search by keyword or attendee.
-- `mcp__...fathom.get_summary` — the auto-generated meeting summary.
-- `mcp__...fathom.get_transcript` — full transcript (on-demand only, when the summary is insufficient for a specific item).
-- `mcp__...fathom.list_team_members` — to resolve attendee identities.
+- `mcp__...fathom.search_meetings` — primary lookup tool. Search by title, attendee, attendee emails, date range.
+- `mcp__...fathom.get_summary` — fetch the auto-generated summary for a specific meeting.
+- `mcp__...fathom.get_transcript` — full transcript. **On-demand only** when the summary doesn't cover the reference.
 
-## Missed meeting detection
-
-Use the Calendar collector's output (once built) to compare against Fathom participant lists. In the MVP, Calendar is out of scope — so detect missed meetings by cross-referencing Fathom recordings the PM has access to against the PM's own attendance (via Fathom's participant list).
-
-This is a partial mechanism. If needed, the PM can manually flag missed meetings by editing the row.
-
-## Attendee classification
-
-Use the Orbit relationship map to classify each attendee:
-
-- External client or agency contact → client
-- AM from Preferences → am
-- WLIQ team member → team
-- Brian / Nishant → leadership
-- Unknown → unknown (matcher handles)
+Tools NOT used by this enrichment-only model:
+- `fathom.list_meetings` — would imply eager collection. Forbidden.
+- `fathom.list_team_members` — attendee identity comes from the meeting object itself.
 
 ## Error handling
 
 | Failure | Behavior |
 |---|---|
-| Fathom MCP unavailable | Return empty signals list with error note. |
-| Individual meeting fetch fails | Skip it. Continue with others. |
-| Recording URL is missing | Still emit the signal but without the URL. Flag in AI Notes: "Fathom recording URL was unavailable." |
+| Fathom MCP unavailable / auth expired | Return `null`. Log to Incidents page once per Mode 1 run: "Fathom enrichment unavailable — N primary signals were not enriched." Do NOT trigger the connector-failure fallback chain (Fathom is non-blocking — see `connector-failure-notify.md`). |
+| Reference resolves to zero meetings | Return `null`. Matcher proceeds without enrichment for this signal. |
+| Reference resolves to a meeting but `get_summary` fails | Return `EnrichmentResult` with `summary_excerpt = null` and `match_confidence: "low"`. Still include recording_url so the PM can watch. |
+| Recording URL is missing from the meeting object | Return the result with `recording_url = null`. Matcher writer should flag in AI Notes: "Fathom recording URL unavailable." |
 
-## What this collector does NOT do
+## What this service does NOT do
 
+- Does not scan or list meetings without a matcher-supplied reference.
+- Does not originate Morning Queue rows.
+- Does not detect missed meetings (no Calendar dependency, no eager meeting list).
 - Does not modify Fathom data.
 - Does not download recordings.
 - Does not create meetings.
-- Does not transcribe anything itself (relies on Fathom's existing summaries and transcripts).
+- Does not transcribe (relies on Fathom's existing summaries and transcripts).
 - Does not deduplicate against Calendar or Orbit.
+- Does not return the full meeting summary or full action-item list — only the slice relevant to the primary signal.

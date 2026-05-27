@@ -56,7 +56,9 @@ The structure of the Preferences page is defined in `schemas/preferences-page.md
 
 ## Source allowlist
 
-> **Primary sources (collection):** Orbit, Gmail, Fathom, Notion.
+> **Primary sources (collection):** Orbit, Gmail, Notion.
+>
+> **Enrichment-on-demand:** Fathom — fetched lazily by the matcher (`synthesis/matcher.md`) via `collectors/fathom.md` when a primary signal (mail / Orbit) references a meeting. Fathom never originates a row.
 >
 > **On-demand read-only references** (used only when an allowed primary signal links to a file there): Google Drive, Google Docs, Google Sheets, SharePoint. Read-only — never write. See `references/external-doc-access.md` for trigger conditions.
 >
@@ -88,7 +90,7 @@ If any MCP connector fails or returns auth errors, the skill notifies the runnin
 
 Defined in `connector-failure-notify.md`.
 
-The skill **must** trigger this fallback chain whenever Orbit, Gmail, Fathom, or Notion return errors. The skill **must not** silently fail or proceed without notifying the PM.
+The skill **must** trigger this fallback chain whenever Orbit, Gmail, or Notion return errors. Fathom failure is **non-blocking** — it only degrades enrichment and is logged to the Incidents page but does not trigger the email/callout fallback chain. The skill **must not** silently fail or proceed without notifying the PM on primary-source failures.
 
 ---
 

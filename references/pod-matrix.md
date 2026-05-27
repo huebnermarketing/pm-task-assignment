@@ -1,6 +1,6 @@
 > **MANDATORY: `preflight.md` must run before any logic in this file. Do not call any tool, do not act on user input, until preflight has completed successfully. This includes routine triggers — preflight runs even when invoked by a scheduled cloud routine.**
 
-> **Source allowlist:** Primary collection — Orbit, Gmail, Fathom, Notion. Read-only references on demand — Google Drive/Docs/Sheets, SharePoint (see `external-doc-access.md`). The Pod Matrix Notion page (this file's subject) is also read-only — see "Notion scope exception" below. No other MCP, ever — Slack is explicitly forbidden.
+> **Source allowlist:** Primary collection — Orbit, Gmail, Notion. Enrichment-on-demand — Fathom (lazy fetch via `collectors/fathom.md`). Read-only references on demand — Google Drive/Docs/Sheets, SharePoint (see `external-doc-access.md`). The Pod Matrix Notion page (this file's subject) is also read-only — see "Notion scope exception" below. No other MCP, ever — Slack is explicitly forbidden.
 
 # Reference — Pod Matrix (read-only)
 

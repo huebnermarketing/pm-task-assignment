@@ -1,6 +1,6 @@
 > **MANDATORY: `preflight.md` must run before any logic in this file. Do not call any tool, do not act on user input, until preflight has completed successfully. This includes scheduled-task triggers — preflight runs even when invoked by the scheduler.**
 
-> **Source allowlist:** Primary collection — Orbit, Gmail, Fathom, Notion (Slack forbidden). Read-only references on demand — Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever. The allowlist is enforced even under experimental scope or forced runs.
+> **Source allowlist:** Primary collection — Orbit, Gmail, Notion (Slack forbidden; Fathom forbidden as standalone source). Enrichment-on-demand — Fathom (lazy fetch via `collectors/fathom.md` when a primary signal references a meeting). Read-only references on demand — Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever. The allowlist is enforced even under experimental scope or forced runs.
 
 # Note Interpreter
 
@@ -16,7 +16,7 @@ Take a short, free-form PM note from a Morning Queue row and resolve it into a c
   - Original recommended action
   - Original recommended assignee
   - Project
-  - Source signals (email, Orbit, Fathom)
+  - Source signals (email, Orbit) + any Fathom enrichment fetched by matcher Job 4b Pass 2
   - Proposed Orbit task body (pre-drafted)
   - Proposed handoff (pre-drafted; copied + sent by PM through whatever channel they use)
   - Proposed email (pre-drafted if any)

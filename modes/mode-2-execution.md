@@ -1,6 +1,6 @@
 > **MANDATORY: `preflight.md` must run before any logic in this file. Do not call any tool, do not act on user input, until preflight has completed successfully. This includes routine triggers — preflight runs even when invoked by a scheduled cloud routine.**
 
-> **Source allowlist:** Primary collection — Orbit, Gmail, Fathom, Notion. Slack is **outbound-send only** (no collection, no reads) and only invoked from the 2 documented send paths: team-handoff send and AM-ping send, each gated by an explicit PM `send` note on the row + audience match. Read-only references on demand — Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever. The allowlist is enforced even under experimental scope or forced runs.
+> **Source allowlist:** Primary collection — Orbit, Gmail, Notion. Enrichment-on-demand — Fathom (lazy fetch via `collectors/fathom.md`). Slack is **outbound-send only** (no collection, no reads) and only invoked from the 2 documented send paths: team-handoff send and AM-ping send, each gated by an explicit PM `send` note on the row + audience match. Read-only references on demand — Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever. The allowlist is enforced even under experimental scope or forced runs.
 
 # Mode 2 — Execution Run
 

@@ -1,6 +1,6 @@
 > **MANDATORY: `preflight.md` must run before any logic in this file. Do not call any tool, do not act on user input, until preflight has completed successfully. This includes routine triggers — preflight runs even when invoked by a scheduled cloud routine.**
 
-> **Source allowlist:** Primary collection — Orbit, Gmail, Fathom, Notion (Slack forbidden). Read-only references on demand — Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever. The allowlist is enforced even under experimental scope or forced runs.
+> **Source allowlist:** Primary collection — Orbit, Gmail, Notion (Slack forbidden; Fathom forbidden as standalone source). Enrichment-on-demand — Fathom (lazy fetch via `collectors/fathom.md` when a primary signal references a meeting). Read-only references on demand — Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever. The allowlist is enforced even under experimental scope or forced runs.
 
 # Mode 1 — Morning Collection Run
 
@@ -60,22 +60,23 @@ This pass is sequential and blocking — Step 3b does not start until Step 3a re
 
 If Preferences has zero AMs configured, the priority pass returns an empty list. Log `priority_pass_no_ams_configured` to Run Log and continue. Mode 1 still completes — only the priority lane is empty for this run.
 
-### Step 3b — Remaining collectors in parallel
+### Step 3b — Remaining primary collectors in parallel
 
-After Step 3a returns, call the remaining collectors in parallel. Do not wait for one before starting the next — they're independent at this stage.
+After Step 3a returns, call the remaining primary collectors in parallel. Do not wait for one before starting the next — they're independent at this stage.
 
 - `collectors/orbit.md` (normal pass — `priority_pass = false`) — full Orbit activity since `last_run_timestamp` minus any tasks already surfaced in Step 3a (deduplicate by `task_id`).
 - `collectors/gmail.md` — scoped to PM's inbox, last <lookback_window>. Also emits `context_link` metadata per signal so matcher Job 4b can cross-link to Orbit signals.
-- `collectors/fathom.md` — scoped to calls PM attended or missed in <lookback_window>. Also emits `context_link` metadata.
 
-**Dual role of Gmail and Fathom.** These collectors do double duty: (a) emit standalone signals where a fresh ask, client question, or action item exists, and (b) carry context-link metadata that `synthesis/matcher.md` Job 4b attaches to corroborating Orbit signals — especially the priority-lane signals from Step 3a. The same Gmail thread between the AM and PM about a priority-lane parent task gets BOTH treatments: it surfaces as Sources context under the priority-lane row, AND (if it contains a fresh ask) may also surface as its own row.
+**Fathom is NOT called in this step.** Fathom is enrichment-only and is invoked lazily by the matcher during Step 4 (synthesis) whenever it detects a meeting reference inside a primary signal. See `collectors/fathom.md` for the enrichment interface and trigger-phrase list.
+
+**Role of Gmail.** Gmail does double duty: (a) emit standalone signals where a fresh ask, client question, or action item exists, and (b) carry context-link metadata that `synthesis/matcher.md` Job 4b attaches to corroborating Orbit signals — especially the priority-lane signals from Step 3a. The same Gmail thread between the AM and PM about a priority-lane parent task gets BOTH treatments: it surfaces as Sources context under the priority-lane row, AND (if it contains a fresh ask) may also surface as its own row.
 
 Each collector returns a list of raw signals with source metadata and full context.
 
-If a collector fails (MCP unavailable, auth expired), do not abort Mode 1. Log a note and proceed:
+If a primary collector fails (MCP unavailable, auth expired), do not abort Mode 1. Log a note and proceed:
 > "Gmail was unavailable this morning — you may want to check manually."
 
-This note is included in the summary section at the top of the dated page.
+This note is included in the summary section at the top of the dated page. Fathom enrichment failure is **non-blocking** and is logged to the Incidents page only (no PM callout) — see `connector-failure-notify.md`.
 
 ### Step 3.5 — Post-collector assertion (MANDATORY)
 
@@ -97,7 +98,7 @@ Output of this step: either a hard abort (case 1) or a clean signals list with w
 
 Feed all collected signals into `synthesis/matcher.md`. The matcher:
 - Groups signals by client + project using the Orbit relationship map (Job 1)
-- **Runs Job 4b context cross-link** — for each Orbit signal (priority-lane first, then normal-pass), scan Gmail and Fathom signals for corroborating context via project_id / actor_emails / topic_keywords / ±24h time proximity. Attach matched Gmail/Fathom signals as `context_signals[]` on the Orbit signal. Cross-linking is additive — the same Gmail/Fathom signal may also become its own row if it contains a fresh ask.
+- **Runs Job 4b context cross-link + Fathom enrichment fetch** — for each Orbit signal (priority-lane first, then normal-pass), scan Gmail signals for corroborating context via project_id / actor_emails / topic_keywords / ±24h time proximity, and attach matched Gmail signals as `context_signals[]` on the Orbit signal. Cross-linking is additive — the same Gmail signal may also become its own row if it contains a fresh ask. Independently, scan EVERY primary signal (Orbit-priority + Orbit-normal + Gmail) for meeting-reference trigger phrases per `collectors/fathom.md`; for each detected reference, lazily call `collectors/fathom.md` `fetch_enrichment()` and attach the returned `EnrichmentResult` as `enrichment.fathom` on the originating signal. Fathom never originates a row.
 - Generates a one-line plain-language summary per item (normal English — PM reads this)
 - Flags items as `Uncertain:` when it can't confidently group or classify
 - Recommends an action per item. Priority-lane signals always become `Create subtask` rows with `parent_task_id` PINNED to `signal.parent_task_id` (the AM-assigned parent the PM is currently the assignee on).
@@ -137,7 +138,7 @@ Update the Preferences page's `last_morning_run` field to now.
 
 Call `writers/run-log.md` with the run summary:
 - Timestamp range (start → end of this Mode 1 fire)
-- Source counts per collector (Orbit / Gmail / Fathom signal counts)
+- Source counts per primary collector (Orbit / Gmail signal counts) + Fathom enrichments fetched (N enrichments attached, M references unresolved)
 - Item count written to today's queue
 - Decisions list (key synthesis decisions, especially `Uncertain:` flags and assignee picks)
 - Connector status (which MCPs were healthy, which degraded, which failed)

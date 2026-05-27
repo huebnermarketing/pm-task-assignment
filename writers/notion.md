@@ -1,6 +1,6 @@
 > **MANDATORY: `preflight.md` must run before any logic in this file. Do not call any tool, do not act on user input, until preflight has completed successfully. This includes scheduled-task triggers — preflight runs even when invoked by the scheduler.**
 
-> **Source allowlist:** Primary collection — Orbit, Gmail, Fathom, Notion (Slack forbidden). Read-only references on demand — Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever. The allowlist is enforced even under experimental scope or forced runs.
+> **Source allowlist:** Primary collection — Orbit, Gmail, Notion (Slack forbidden; Fathom forbidden as standalone source). Enrichment-on-demand — Fathom (lazy fetch via `collectors/fathom.md` when a primary signal references a meeting). Read-only references on demand — Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever. The allowlist is enforced even under experimental scope or forced runs.
 
 # Notion Writer
 
@@ -102,12 +102,14 @@ For each item in the matcher's output array (after Step 5.5 gating):
    - `Recommended Assignee` — name + role + short reason; `—` for advisory items
    - `Outcome` — empty (filled by Mode 2; Mode 2 writes the new sub-task URL here, NOT into Orbit Task Link)
    - `PM Notes` — empty
-   - `Source Systems` — multi-select of which collectors contributed (Orbit, Gmail, Fathom)
+   - `Source Systems` — multi-select of which sources contributed (Orbit, Gmail — primary; Fathom only if matcher Job 4b Pass 2 fetched enrichment for this row)
    - `Status` = `Recommended Action` (default)
 
 2. Populate the row's page content per `schemas/row-detail-page.md`:
    - `Summary` heading + the matcher's summary
-   - `Sources` heading + full citations per `writers/source-citation.md`. When matcher Job 4b produced a `context_signals[]` array on this row (Gmail/Fathom signals linked to a primary Orbit signal as corroborating context), render each linked signal as an H2 subsection under Sources. High-confidence cross-links go under the primary Sources list; weak cross-links (match_strength="weak") go under an H2 `Possible context` subsection.
+   - `Sources` heading + full citations per `writers/source-citation.md`. Two cases:
+     - **Job 4b Pass 1 (Gmail → Orbit cross-link).** When `context_signals[]` is populated on this row, render each linked Gmail signal as an H2 subsection under Sources. High-confidence cross-links go under the primary Sources list; weak cross-links (match_strength="weak") go under an H2 `Possible context` subsection.
+     - **Job 4b Pass 2 (Fathom enrichment).** When `enrichment.fathom` is populated on this row (the matcher fetched a meeting context from `collectors/fathom.md`), render it under an H2 `Fathom enrichment` subsection per `schemas/row-detail-page.md`. Include the trigger phrase that caused the fetch, the scoped summary excerpt, relevant action items, attendees, and the recording link. Skip this subsection entirely if `enrichment.fathom` is null.
    - `Recommended Action` heading + reasoning
    - `Proposed Orbit Task Body` heading + 6-section body in plain language
    - `Proposed Handoff` heading + plain-language message

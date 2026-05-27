@@ -17,8 +17,8 @@ PM Automation MVP 1/
 ├── first-run-setup.md               ← 9-field conversational/template setup
 ├── invocation-commands.md           ← command syntax + lenient routing
 ├── modes/                           ← Mode 1 (with Step 3a Orbit-first priority pass), Mode 2, monthly archival
-├── collectors/                      ← Orbit, Gmail, Fathom (Slack not collected)
-├── synthesis/                       ← matcher (with Job 4b context cross-link), pod inference, note interpreter
+├── collectors/                      ← Orbit, Gmail (primary collection); Fathom (enrichment-on-demand, lazy)
+├── synthesis/                       ← matcher (Job 4b Pass 1 Gmail cross-link + Pass 2 Fathom enrichment fetch), pod inference, note interpreter
 ├── executors/                       ← Orbit, Email (sent-email exceptions), Slack (outbound-send only)
 ├── writers/                         ← Notion writer, plain-language splitter, source citation
 ├── schemas/                         ← parent page, Preferences, Morning Queue DB, row detail, Orbit DQ
@@ -36,7 +36,7 @@ PM Automation MVP 1/
 Each PM needs:
 
 1. A Claude account with Cowork enabled.
-2. MCP connections to: Orbit, Gmail, Fathom, Notion (4 collection MCPs, all authenticated). Plus Slack (by Salesforce) for outbound-send only — Mode 2 sends team handoffs + AM pings to Slack ONLY when the PM leaves an explicit `send` note on the row + audience matches `team` or `am`. Optional read-only references: Google Drive/Docs/Sheets, SharePoint (used on demand when primary signals link to those documents — see `references/external-doc-access.md`).
+2. MCP connections to: Orbit, Gmail, Notion (3 primary collection MCPs, all authenticated) + Fathom (enrichment-on-demand — matcher Job 4b Pass 2 lazy-fetches meeting context when a primary signal references a call; failure is non-blocking). Plus Slack (by Salesforce) for outbound-send only — Mode 2 sends team handoffs + AM pings to Slack ONLY when the PM leaves an explicit `send` note on the row + audience matches `team` or `am`. Optional read-only references: Google Drive/Docs/Sheets, SharePoint (used on demand when primary signals link to those documents — see `references/external-doc-access.md`).
 3. A Notion workspace and a parent page where the skill will write morning queues.
 4. Three Claude Routines configured per `ROUTINE-ENTRYPOINTS.md` (Mode 1, Mode 2, Monthly Archival). Each routine fires on its own cron — there is no in-skill scheduled-tasks dependency.
 
@@ -78,7 +78,7 @@ All answers are written to the `Preferences` sub-page at the bottom of the Notio
 
 ## What happens every morning (after setup)
 
-- **9:30 AM IST** (or your configured time): Mode 1 fires. Skill runs Step 3a (Orbit-first priority pass — AM-handed parent tasks due today) then Step 3b (parallel Orbit-normal + Gmail + Fathom). Synthesizes. Writes today's dated sub-page at the top of your Notion parent with an inline Morning Queue database — priority-lane rows sort at the top. No prompts. No input required.
+- **9:30 AM IST** (or your configured time): Mode 1 fires. Skill runs Step 3a (Orbit-first priority pass — AM-handed parent tasks due today) then Step 3b (parallel Orbit-normal + Gmail). Synthesizes. During synthesis the matcher lazily fetches Fathom enrichment for any signal that references a meeting (no eager Fathom collection). Writes today's dated sub-page at the top of your Notion parent with an inline Morning Queue database — priority-lane rows sort at the top. No prompts. No input required.
 - **You at \~10:00 AM**: Open Notion. Read the queue. For each row, either flip Status to `Approved`, drop a note in PM Notes (including the optional `send` note + audience match if you want Slack auto-send), or leave it at `Recommended Action` or `Skip. No Action Needed`. Flip the `Ready for Execution` toggle at the top when done.
 - **10:45 AM IST** (or your configured time): Mode 2 fires. Reads the Ready toggle. If ON, executes every `Approved` row and every row with a note. Writes Done outcomes. Writes a completion-summary callout block at the top of today's dated page (no DM — you're already in Notion).
 - **If Ready toggle is OFF at 10:45**: Skill emails your configured escalation backup with a link to the page.
@@ -98,7 +98,7 @@ All answers are written to the `Preferences` sub-page at the bottom of the Notio
 Check the Mode 1 Claude Routine — it may be paused or its cron may have drifted. Type `PM Task Assignment, run morning` to fire Mode 1 manually for today. Re-enable or fix the routine for tomorrow.
 
 **"A collector failed."**
-If an MCP source is unavailable during Mode 1 (Gmail down, Fathom auth expired, etc.), the skill continues with what it has and writes a note on today's page: "Gmail unavailable this morning — you may want to check manually." Fix the auth and the next run will pick up everything that was missed (dynamic lookback based on last-run timestamp).
+If a primary MCP source is unavailable during Mode 1 (Orbit, Gmail, or Notion down/auth expired), the skill continues with what it has and writes a note on today's page: "Gmail unavailable — manual check needed for the last <lookback_window>." Fix the auth and the next run will pick up everything that was missed (dynamic lookback based on last-run timestamp). If Fathom is down, the skill logs it to the Incidents page only (non-blocking — primary signals still flow; meeting-enrichment context is just skipped for that run).
 
 **"Mode 2 didn't execute even though I flipped Ready."**
 Check that Ready was ON before the scheduled execution time. If not, type `PM Task Assignment, run execution now` to fire Mode 2 manually.

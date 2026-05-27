@@ -1,12 +1,12 @@
 > **MANDATORY: `preflight.md` must run before any logic in this file. Do not call any tool, do not act on user input, until preflight has completed successfully. This includes scheduled-task triggers — preflight runs even when invoked by the scheduler.**
 
-> **Source allowlist:** Primary collection — Orbit, Gmail, Fathom, Notion (Slack forbidden). Read-only references on demand — Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever. The allowlist is enforced even under experimental scope or forced runs.
+> **Source allowlist:** Primary collection — Orbit, Gmail, Notion (Slack forbidden; Fathom forbidden as standalone source). Enrichment-on-demand — Fathom (lazy fetch via `collectors/fathom.md` when a primary signal references a meeting). Read-only references on demand — Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever. The allowlist is enforced even under experimental scope or forced runs.
 
 # Matcher
 
 ## Purpose
 
-Takes every signal from the three collectors (Orbit, Gmail, Fathom) — including the Orbit collector's priority-pass output (`signal_type: am_handed_to_pm_overnight_due_today`) — and turns them into a clean, ordered list of items the PM will see in today's Morning Queue.
+Takes every signal from the two primary collectors (Orbit, Gmail) — including the Orbit collector's priority-pass output (`signal_type: am_handed_to_pm_overnight_due_today`) — and turns them into a clean, ordered list of items the PM will see in today's Morning Queue. During Job 4b, the matcher additionally invokes the Fathom enrichment service (`collectors/fathom.md`) on-demand to attach meeting context to any primary signal that references a meeting. Fathom never originates a row.
 
 ## Identity matching is alias-aware
 
@@ -49,7 +49,7 @@ The matcher checks the drop list BEFORE deciding Create-subtask vs Flag. If a si
 
 For every signal that survives the static drop list, run a PM-action check before deciding Flag vs Drop:
 
-1. Capture the signal's arrival timestamp (`signal.timestamp` — when the email arrived, when the Orbit comment was posted, when the Fathom call ended).
+1. Capture the signal's arrival timestamp (`signal.timestamp` — when the email arrived or when the Orbit comment was posted).
 2. Look for PM-originated activity in the window `(signal.timestamp, mode1_fire_time)` that matches the signal's context:
    - **Gmail:** any thread message with `labelIds` containing `SENT` from the PM's canonical email or alias, on the same `threadId` as the signal.
    - **Orbit:** any task comment authored by the PM (`actor_id == PM_user_id`) on the same task or project, OR any task field change (status, due date, assignee) actored by the PM. From `get_activity_log`.
@@ -93,24 +93,20 @@ For Gmail signals:
 - Read subject and body for project-name keywords
 - If multiple projects match, pick the most recently active one and flag `Uncertain:` with an AI Note
 
-For Fathom signals:
-- Check meeting title and attendee list
-- Match external attendees to client contacts
-- Match meeting title against client/project names
-- If a meeting covered multiple projects, split into multiple items (one per project)
+Fathom is not a signal source. Meeting context is fetched as enrichment during Job 4b — see that job for the trigger-detection + lazy-fetch flow.
 
 For priority-lane Orbit signals (`signal_type: am_handed_to_pm_overnight_due_today`): `project_id` and `parent_task_id` are already on the signal — no inference needed. Skip the rest of Job 1 for these and pass straight to Job 4b.
 
 ### Job 2 — Deduplicate across sources
 
-A single issue may show up in Gmail, Fathom, and Orbit. Matcher merges them into one item.
+A single issue may show up in both Gmail and Orbit. Matcher merges them into one item.
 
 Match signals as the same item when:
 - Same project AND same topic/deliverable (keyword overlap in content)
-- Same client contact sent the email AND AM discussed it in a Fathom call within the same \~24-hour window
-- Fathom meeting's action item overlaps with a subsequent email ask
+- Same actors involved AND signals fall within the same ~24-hour window
+- One signal explicitly cites the other (e.g., Orbit comment quotes an email subject)
 
-When merging, preserve all source signals in `source_signals`. The row's detail page will cite each source separately.
+When merging, preserve all source signals in `source_signals`. The row's detail page will cite each source separately. Fathom enrichment (if fetched in Job 4b) is attached to whichever primary signal triggered the fetch — it is never a co-signal to dedupe against.
 
 ### Job 3 — Uncertainty handling — NO probable-match grouping
 
@@ -165,24 +161,40 @@ Rules:
 - No emojis. No narrative context.
 - Max 120 chars total (Notion title field stays scannable across the column).
 
-### Job 4b — Context cross-link (Gmail/Fathom → Orbit)
+### Job 4b — Context cross-link (Gmail → Orbit) + Fathom enrichment fetch
 
-Before deciding row type in Job 5, attach corroborating Gmail and Fathom signals to each Orbit signal so the row detail page renders the full backstory in one place. Priority-lane signals get this pass first; normal Orbit signals get it second.
+Two independent passes happen here. Both run before Job 5 row-type decisions so the row detail page renders the full backstory in one place. Priority-lane signals get both passes first; normal Orbit signals get them second.
 
-For each Orbit signal (priority-lane first, then normal-pass), scan the Gmail and Fathom signal lists and link any signal whose `context_link` corroborates the Orbit event. A Gmail or Fathom signal corroborates an Orbit signal when ANY of the following hold:
+#### Pass 1 — Gmail → Orbit cross-link
 
-1. **Project match.** `gmail_or_fathom.context_link.project_id_candidates` contains the Orbit signal's `project_id`.
-2. **Actor match.** `gmail_or_fathom.context_link.actor_emails` intersects with the Orbit signal's AM identity (for priority-lane: `signal.am_actor_email` + aliases) or with the parent task's follower / assignee emails.
-3. **Topic match.** `gmail_or_fathom.context_link.topic_keywords` overlaps with the parent task title or task body, above a simple threshold (≥ 2 keyword matches, case-insensitive). No embeddings — substring or token-overlap is sufficient.
-4. **Time proximity.** `gmail_or_fathom.context_link.timestamp` is within ±24h of the Orbit signal's event timestamp (`event_timestamp` for priority-lane, `timestamp` for normal-pass).
+For each Orbit signal, scan the Gmail signal list and link any Gmail signal whose `context_link` corroborates the Orbit event. A Gmail signal corroborates an Orbit signal when ANY of the following hold:
 
-Match strength: a Gmail/Fathom signal that hits 2+ rules above is high-confidence corroboration. A signal that hits exactly 1 rule is weak corroboration — still attach, but mark it weak so the row detail Sources section can render it under a `Possible context` subheading.
+1. **Project match.** `gmail.context_link.project_id_candidates` contains the Orbit signal's `project_id`.
+2. **Actor match.** `gmail.context_link.actor_emails` intersects with the Orbit signal's AM identity (for priority-lane: `signal.am_actor_email` + aliases) or with the parent task's follower / assignee emails.
+3. **Topic match.** `gmail.context_link.topic_keywords` overlaps with the parent task title or task body, above a simple threshold (≥ 2 keyword matches, case-insensitive). No embeddings — substring or token-overlap is sufficient.
+4. **Time proximity.** `gmail.context_link.timestamp` is within ±24h of the Orbit signal's event timestamp (`event_timestamp` for priority-lane, `timestamp` for normal-pass).
 
-For each Orbit signal, populate `context_signals[]` with the matched Gmail/Fathom signals, each annotated with `match_strength: "strong" | "weak"` and `match_rules: [<which rules fired>]`.
+Match strength: a Gmail signal that hits 2+ rules is high-confidence corroboration. A signal that hits exactly 1 rule is weak corroboration — still attach, but mark it weak so the row detail Sources section can render it under a `Possible context` subheading.
 
-**Additivity.** Linking a Gmail or Fathom signal as context does NOT consume it. The same signal may also surface as its own row (under Job 5 — Create subtask or Flag) IF it contains a fresh ask (new requirement, new client question, new commitment). The matcher decides that independently per signal in Job 5.
+For each Orbit signal, populate `context_signals[]` with the matched Gmail signals, each annotated with `match_strength: "strong" | "weak"` and `match_rules: [<which rules fired>]`.
 
-**Writer impact.** `writers/notion.md` reads `context_signals[]` on each row and renders the linked sources under the row's Sources H1 section in `schemas/row-detail-page.md`, using the citation formats in `writers/source-citation.md`. Priority-lane rows see the AM-handed Orbit parent task at the top of Sources, with the corroborating Gmail thread (if any) and Fathom call (if any) below.
+**Additivity.** Linking a Gmail signal as context does NOT consume it. The same Gmail signal may also surface as its own row (under Job 5 — Create subtask or Flag) IF it contains a fresh ask (new requirement, new client question, new commitment). The matcher decides that independently per signal in Job 5.
+
+#### Pass 2 — Fathom enrichment fetch (lazy, on-demand)
+
+Independently of Pass 1, scan EVERY primary signal (Orbit-priority + Orbit-normal + Gmail) for meeting-reference trigger phrases per the trigger-phrase list documented in `collectors/fathom.md`. For each detected reference, call the Fathom enrichment service:
+
+```
+result = fetch_enrichment(reference, signal_context)
+```
+
+If `result` is non-null, attach it as `signal.enrichment.fathom = result` on the originating primary signal. If `result` is null (Fathom unavailable, no matching meeting, or reference unresolved), continue without enrichment — the primary signal still flows through Job 5 normally.
+
+Multiple primary signals may reference the same meeting; each gets its own `EnrichmentResult` attachment so the writer can cite the meeting under each row that referenced it. The enrichment service may cache duplicate lookups within a single Mode 1 run — that is an implementation detail and does not change the matcher contract.
+
+**Critical:** Fathom enrichment never produces a `context_signal` and never originates a row. It only annotates an existing primary signal. If a meeting was referenced in a Gmail signal that is later filtered out by Job 5, the enrichment is discarded with it — there is no Fathom-only row.
+
+**Writer impact.** `writers/notion.md` reads `context_signals[]` AND `enrichment.fathom` on each row. `context_signals[]` renders under the row's Sources H1 section per `schemas/row-detail-page.md`. `enrichment.fathom` renders under the Fathom H2 subsection of Sources (per `schemas/row-detail-page.md`), using the citation formats in `writers/source-citation.md`. Priority-lane rows see the AM-handed Orbit parent task at the top of Sources, the corroborating Gmail thread (if any) below, and the Fathom enrichment (if any) under the Fathom H2.
 
 ### Job 5 — Recommend the action (2 actions only)
 
@@ -361,12 +373,14 @@ For every signal (or grouped signal-set) the Output gating filter dropped, appen
 
 ```
 {
-  "source": <orbit | gmail | fathom>,
+  "source": <orbit | gmail>,
   "summary": <one-line description of what was dropped>,
   "filter_reason": <one of: pm_already_handled | hours_overrun_alert | pm_own_task_orbit_ui | rollup | standup_recap | third_party_automation | marketing_or_system_email | project_type_unknown>,
-  "citations": [<source links — gmail thread URL, orbit task URL, fathom recording URL>]
+  "citations": [<source links — gmail thread URL, orbit task URL>]
 }
 ```
+
+Fathom never appears in `filtered_signals` — it is not a signal source. Enrichment failures (Fathom unavailable, reference unresolved) are logged separately under the Run Log's connector-status section, not under filtered signals.
 
 `writers/run-log.md` consumes this array and writes a `Filtered signals (N)` collapsible section in the Run Log detail page. Standard Notion toggle, closed by default. The PM opens it only when they want to audit what was suppressed.
 

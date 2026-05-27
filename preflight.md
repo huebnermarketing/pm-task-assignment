@@ -16,7 +16,7 @@ Every entry into the skill:
 
 - Open `config.md` and read every section.
 - Confirm `DEFAULT_NOTION_PARENT_PAGE_ID` is set to a real Notion page ID (32-char hex string with or without dashes).
-- Confirm the source allowlist clause is loaded into context: primary collection — Orbit, Gmail, Fathom, Notion; Slack is outbound-send only (Mode 2 team-handoff + AM-ping with explicit PM `send` note — see `executors/slack.md`) and is never used for collection; read-only references on demand — Google Drive/Docs/Sheets, SharePoint per `references/external-doc-access.md`.
+- Confirm the source allowlist clause is loaded into context: primary collection — Orbit, Gmail, Notion; enrichment-on-demand — Fathom (lazy fetch via `collectors/fathom.md` when a primary signal references a meeting); Slack is outbound-send only (Mode 2 team-handoff + AM-ping with explicit PM `send` note — see `executors/slack.md`) and is never used for collection; read-only references on demand — Google Drive/Docs/Sheets, SharePoint per `references/external-doc-access.md`.
 - Confirm the Preferences-must-be-respected clause is loaded.
 - **Set the in-memory flag `is_interactive`.** `true` if the skill was triggered by a human-typed message in a Claude session (Claude Desktop manual command); `false` if the trigger is a routine / cron / SDK invocation. Mode files read this flag to decide whether to ask one clarifying question per ambiguous item or to fall straight to `Uncertain:`. See `ENVIRONMENTS.md`.
 
@@ -52,23 +52,28 @@ If any **required** field is missing from a Preferences page that exists:
 - Email the user themselves (sent, not drafted): "Your Preferences page is incomplete — [field] is missing. Please run `PM Task Assignment, change my preference: ...` to fix, or re-run first-run setup."
 - ABORT the current run.
 
-### Step 5 — Verify the 4 MCP connectors are responsive
+### Step 5 — Verify the MCP connectors are responsive
 
-For each of the 4 allowlisted MCPs, run a lightweight ping (a read-only call that should succeed quickly):
+For each MCP below, run a lightweight ping (a read-only call that should succeed quickly):
 
-| MCP | Verification call |
-|---|---|
-| Orbit | `get_user_details` for the PM (identity check from Preferences) |
-| Gmail | `gmail_get_profile` |
-| Fathom | `list_meetings` with the smallest date range possible |
-| Notion | `notion-fetch` of the parent page (already done in step 2 — reuse) |
+| MCP | Verification call | Blocking? |
+|---|---|---|
+| Orbit | `get_user_details` for the PM (identity check from Preferences) | Yes (primary collection) |
+| Gmail | `gmail_get_profile` | Yes (primary collection) |
+| Notion | `notion-fetch` of the parent page (already done in step 2 — reuse) | Yes (primary collection) |
+| Fathom | `search_meetings` with attendee = PM email and the smallest date range possible | **No (enrichment-on-demand)** |
 
 > **Retry policy applies.** Each verification ping above uses the retry-with-backoff policy in `connector-failure-notify.md` (4 attempts total, 2s/5s/15s backoff, retry only on transient errors). A single transient blip during preflight does NOT abort the run — only exhaustion of retries counts as "MCP down" for the decision logic below.
 
-For each MCP that fails:
+For each primary collection MCP (Orbit, Gmail, Notion) that fails:
 
 - Route to `connector-failure-notify.md` with the MCP name and the error.
 - Continue checking the rest — collect ALL failures, then notify.
+
+For Fathom (enrichment-on-demand) failure:
+
+- Log a warning to the run-log + Incidents page (Tier 3 only) per `connector-failure-notify.md`. Do NOT fire Tier 1 email or Tier 2 Notion red callout.
+- Continue preflight. Mode 1 will still run; the matcher's Job 4b Pass 2 enrichment calls will return null and the matcher will proceed without Fathom context on this run.
 
 After the verification:
 
@@ -95,7 +100,7 @@ After creation/verification, the bottom three `child_page` blocks on the parent 
 - Does NOT execute any morning collection logic, executor logic, or write any task data. That happens after preflight returns control.
 - Does NOT modify Preferences.
 - Does NOT modify config.
-- Does NOT call any tool from outside the source allowlist (4 primary MCPs + 4 read-only reference MCPs per `references/external-doc-access.md` + the read-only Pod Matrix exception per `references/pod-matrix.md`).
+- Does NOT call any tool from outside the source allowlist (3 primary collection MCPs — Orbit, Gmail, Notion — plus the Fathom enrichment MCP, plus the Slack outbound-send MCP, plus 4 read-only reference MCPs per `references/external-doc-access.md`, plus the read-only Pod Matrix exception per `references/pod-matrix.md`).
 - Does NOT fetch the Pod Matrix page. That is fetched by `modes/mode-1-morning-collection.md` Step 2.5 via `references/pod-matrix.md` (cached for the run). Mode 2 and Monthly Archival never fetch it.
 
 ## Identity check (also part of preflight, in step 5)

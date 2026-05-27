@@ -79,13 +79,18 @@ Full citation. Example:
 > **Current assignee:** Vijay Patel
 > **Overdue:** 1 day
 
-#### H2: Fathom (if applicable)
+#### H2: Fathom enrichment (if applicable)
+
+Appears only when matcher Job 4b Pass 2 fetched Fathom enrichment for this row (i.e. a primary signal referenced a meeting via a trigger phrase). Renders the `enrichment.fathom` payload from the signal — never appears for rows without a triggering reference.
 
 > **Meeting:** [Meeting title]
 > **Date:** 24 April 2026, 3:00 PM IST
 > **Duration:** 38 minutes
 > **Attendees:** [list]
-> **Relevant extract:** [action item or quote]
+> **Triggered by:** [the trigger phrase from the primary signal — e.g. "per our call"]
+> **Relevant extract:** [scoped 2-4 sentence summary excerpt]
+> **Relevant action items:** [only items overlapping the primary signal's project / actors]
+> **Match confidence:** high / medium / low
 > [Watch recording](<url>)
 
 #### H2: Document read (if applicable)
@@ -162,8 +167,8 @@ The toggle stays closed by default. The PM never needs to open it. The skill rea
 ## Email — Gmail
 <full citation>
 
-## Fathom — call title
-<full citation>
+## Fathom enrichment — call title (only if matcher fetched it)
+<scoped citation with trigger phrase + relevant extract>
 
 # Recommended Action
 <paragraph with reasoning>

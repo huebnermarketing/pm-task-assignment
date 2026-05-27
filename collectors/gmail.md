@@ -1,6 +1,6 @@
 # Gmail Collector
 
-> **This collector uses ONLY the Gmail MCP. Source allowlist — primary collection: Orbit, Gmail, Fathom, Notion (Slack forbidden). Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). Nothing else, ever.**
+> **This collector uses ONLY the Gmail MCP. Source allowlist — primary collection: Orbit, Gmail, Notion (Slack forbidden; Fathom forbidden as standalone source). Enrichment-on-demand: Fathom (lazy fetch via `collectors/fathom.md` when a primary signal references a meeting). Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). Nothing else, ever.**
 
 > **Preflight (`preflight.md`) must have run before this collector is invoked.**
 

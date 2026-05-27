@@ -1,4 +1,4 @@
-> **This collector uses ONLY the Orbit MCP. Source allowlist — primary collection: Orbit, Gmail, Fathom, Notion (Slack forbidden). Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever — including any that may seem relevant to a specific signal.**
+> **This collector uses ONLY the Orbit MCP. Source allowlist — primary collection: Orbit, Gmail, Notion (Slack forbidden; Fathom forbidden as standalone source). Enrichment-on-demand: Fathom (lazy fetch via `collectors/fathom.md` when a primary signal references a meeting). Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever — including any that may seem relevant to a specific signal.**
 
 > **Preflight (`preflight.md`) must have run before this collector is invoked. Do not call any tool until preflight has completed.**
 

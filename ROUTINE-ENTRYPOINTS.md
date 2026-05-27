@@ -14,11 +14,11 @@ Before creating any routine, the operator must have:
 
 - [ ] **PM's Notion parent page ID** — the 32-character UUID (or the share-link short ID) of the PM's parent page that holds Preferences + dated queue pages + Run Log database.
 - [ ] **PM's Preferences page URL** — the public Notion URL of the Preferences page on that parent.
-- [ ] **MCP authentication confirmed** for the PM's Claude account — 4 primary MCPs + Slack outbound-send (5 connectors total) connected and authenticated. The skill's source allowlist (per `SKILL.md` and `config.md`) is closed; no routine prompt may add to it or remove from it:
+- [ ] **MCP authentication confirmed** for the PM's Claude account — 3 primary collection MCPs + Fathom enrichment MCP + Slack outbound-send (5 connectors total) connected and authenticated. The skill's source allowlist (per `SKILL.md` and `config.md`) is closed; no routine prompt may add to it or remove from it:
   - [ ] Orbit (primary collection + execution)
   - [ ] Gmail (primary collection + sent-email exceptions)
-  - [ ] Fathom (primary collection)
   - [ ] Notion (parent page read/write)
+  - [ ] Fathom (enrichment-on-demand — lazy fetch by matcher Job 4b only. Non-blocking on failure.)
   - [ ] Slack (outbound-send ONLY — team-handoff + AM-ping with explicit PM `send` note. No collection.)
 - [ ] **Repo URL** of the public GitHub repo holding the skill — referred to below as `<REPO_URL>` (raw-content base, e.g. `https://raw.githubusercontent.com/<org>/<repo>/main`).
 - [ ] **Pod Matrix Notion page URL** — the read-only org-wide page listing PM-owned and functional matrices (e.g., the public `Matrix Detail` share URL). Used by Mode 1 only for assignee recommendation. Mode 2 and Monthly Archival do not need it.
@@ -30,11 +30,11 @@ If any item is missing, do not create routines. Stop and resolve first.
 
 ## Routine 1 — Mode 1 (Morning Collection)
 
-Purpose: pull overnight signals from Orbit / Gmail / Fathom in two passes — Orbit-first priority pass (AM-handed parent tasks due today) followed by parallel Orbit-normal + Gmail + Fathom — write a dated queue page on the Notion parent, await PM approval (PM acts in their own time, not in this routine).
+Purpose: pull overnight signals from Orbit and Gmail in two passes — Orbit-first priority pass (AM-handed parent tasks due today) followed by parallel Orbit-normal + Gmail — write a dated queue page on the Notion parent, await PM approval (PM acts in their own time, not in this routine). Fathom is enrichment-only: the matcher lazily fetches meeting context during synthesis when a primary signal references a call.
 
 - **Cron (default):** `30 9 * * *` (09:30 IST daily)
 - **Override:** if Preferences specifies a different morning run time, use that — still in IST.
-- **Connectors required:** Orbit, Gmail, Fathom, Notion (4 collection MCPs). Slack is not used by Mode 1 — Slack is outbound-send only and only invoked by Mode 2.
+- **Connectors required:** Orbit, Gmail, Notion (3 primary collection MCPs) + Fathom (enrichment-on-demand, non-blocking on failure). Slack is not used by Mode 1 — Slack is outbound-send only and only invoked by Mode 2.
 
 ### Prompt template
 
@@ -56,7 +56,7 @@ NOTION_PARENT_PAGE_URL=<INJECTED_VALUE>
 PREFERENCES_PAGE_URL=<INJECTED_VALUE>
 POD_MATRIX_URL=<INJECTED_VALUE>          # Read-only Notion page with the org's pod/matrix structure. Mode 1 only.
 
-Connectors available in this routine (4 for collection): Orbit, Gmail, Fathom, Notion. Do NOT skip any collector. Do NOT use any MCP outside this list, even if it appears authenticated. Slack is forbidden in Mode 1 — it is outbound-send only and reserved for Mode 2's team-handoff + AM-ping paths with explicit PM `send` note.
+Connectors available in this routine: Orbit, Gmail, Notion (3 primary collection MCPs) + Fathom (enrichment-on-demand, lazy-called by synthesis/matcher.md Job 4b Pass 2 only — never eagerly listed). Do NOT skip any primary collector. Do NOT use any MCP outside this list, even if it appears authenticated. Slack is forbidden in Mode 1 — it is outbound-send only and reserved for Mode 2's team-handoff + AM-ping paths with explicit PM `send` note. Fathom MCP failure is non-blocking — log to Incidents and continue.
 
 Notion read-only exception: Notion access is normally restricted to NOTION_PARENT_PAGE_URL (read + write). For this Mode 1 routine ONLY, you may also notion-fetch POD_MATRIX_URL (read-only). Do NOT write to it. Do NOT enumerate or search around it.
 
@@ -81,7 +81,7 @@ Mandatory Orbit collector tool sequence per `collectors/orbit.md`: `get_activity
 Execute Mode 1 end-to-end:
 - Run preflight Steps 1–6 against the Notion parent and Preferences page (all in IST).
 - Fetch and parse POD_MATRIX_URL once at the start of the run via references/pod-matrix.md; cache the parsed pools (PM matrix, floaters, functional matrices) for the whole run. On fetch or parse failure, log a warning to the Run Log detail page and continue with Orbit-only pod inference (graceful degradation per references/pod-matrix.md).
-- Collect overnight signals in two passes: (a) Step 3a Orbit-first priority pass (sequential, blocking) — narrow scope to parent tasks an AM created or reassigned to the running PM overnight with due_date=today; (b) Step 3b parallel pass — Orbit-normal + Gmail + Fathom. Window boundary in IST. Orbit collector MUST invoke `get_activity_log` and `list_task_comments` per the mandatory sequence above (shared across both passes — the priority pass reuses the activity-log response from the normal pass).
+- Collect overnight signals in two passes: (a) Step 3a Orbit-first priority pass (sequential, blocking) — narrow scope to parent tasks an AM created or reassigned to the running PM overnight with due_date=today; (b) Step 3b parallel pass — Orbit-normal + Gmail. Window boundary in IST. Fathom is NOT called in this step; it is lazy-fetched by the matcher in Job 4b Pass 2 when a primary signal references a meeting. Orbit collector MUST invoke `get_activity_log` and `list_task_comments` per the mandatory sequence above (shared across both passes — the priority pass reuses the activity-log response from the normal pass).
 - Run Mode 1 Step 3.5 assertion before synthesis. Abort if `get_activity_log` call count is zero.
 - Synthesize per synthesis/matcher.md: apply the Output gating filter first (PM-action detection drops `pm_already_handled`; static drop list removes hours-overrun / Orbit-UI-visible / rollup / third-party noise; survivors reduce to either `Create subtask` or `Flag`), then run Jobs 1–11 on what remains. Recommend assignees per Job 6 (history wins → matrix availability → floater availability → cross-matrix Uncertain). Availability (get_user_workload) fires only on the no-history fallback path.
 - Write today's dated queue page on the Notion parent per writers/notion.md, placed at Parent → <Year> → <Month> → <DD Month YYYY> per schemas/parent-page.md (the writer creates the Year and Month container sub-pages on demand if missing). The writer applies a Step 5.5 defense-in-depth check that re-runs the Output gating filter and pushes any drift rows to filtered_signals.
@@ -194,7 +194,7 @@ After all 3 routines are created in Claude Routines:
 
 1. Open a regular (non-routine) Claude session with the same MCPs authenticated.
 2. Run the manual `validate setup` command per `invocation-commands.md`, pointing at the same Preferences page URL.
-3. Confirm preflight passes — parent page reachable, Preferences page parsed cleanly, 4 collection MCPs respond (Orbit, Gmail, Fathom, Notion) and Slack outbound responds, Run Log + Incidents + Preferences present in the correct order at the bottom of the parent (or that preflight Step 6 created them on first run).
+3. Confirm preflight passes — parent page reachable, Preferences page parsed cleanly, 3 primary collection MCPs respond (Orbit, Gmail, Notion), Fathom enrichment MCP responds (or logs warning and continues — non-blocking), Slack outbound responds, Run Log + Incidents + Preferences present in the correct order at the bottom of the parent (or that preflight Step 6 created them on first run).
 4. If `validate setup` reports errors, fix before relying on the routines.
 
 Optional: trigger Routine 1 manually once via the Claude Routines UI ("run now") and inspect the resulting queue page + Run Log row to confirm shape.

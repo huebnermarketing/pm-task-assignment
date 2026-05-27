@@ -1,4 +1,4 @@
-> **This executor uses ONLY the Slack MCP, and only for outbound-send. Source allowlist — primary collection: Orbit, Gmail, Fathom, Notion. Slack is NOT a collection source (the Slack collector was removed) — this executor's sole purpose is to send 2 specific kinds of message via Slack when the PM explicitly opted in. Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever.**
+> **This executor uses ONLY the Slack MCP, and only for outbound-send. Source allowlist — primary collection: Orbit, Gmail, Notion. Enrichment-on-demand: Fathom (lazy fetch via `collectors/fathom.md`). Slack is NOT a collection source (the Slack collector was removed) — this executor's sole purpose is to send 2 specific kinds of message via Slack when the PM explicitly opted in. Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever.**
 
 > **Preflight (`preflight.md`) must have run before this executor is invoked.**
 

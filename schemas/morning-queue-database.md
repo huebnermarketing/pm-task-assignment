@@ -136,7 +136,9 @@ The database has **10 columns total**. All 10 are visible in the default view, i
 | `Gmail` | red |
 | `Fathom` | orange |
 
-The skill picks any combination of the three. A row that came from a single Gmail thread gets `[Gmail]`. A row aggregated from email + Orbit gets `[Gmail, Orbit]`. Priority-lane rows (Mode 1 Step 3a) always include `Orbit` and may also include `Gmail` and/or `Fathom` if matcher Job 4b cross-linked corroborating context signals.
+The skill picks any combination of the three. A row that came from a single Gmail thread gets `[Gmail]`. A row aggregated from email + Orbit gets `[Gmail, Orbit]`. Priority-lane rows (Mode 1 Step 3a) always include `Orbit` and may also include `Gmail` if matcher Job 4b Pass 1 cross-linked a corroborating Gmail signal.
+
+**Fathom only appears in Source Systems when the matcher fetched Fathom enrichment** for the row (Job 4b Pass 2 — lazy fetch triggered by a meeting reference in the primary signal). Fathom never originates a row, so a row tagged `[Fathom]` alone is impossible — Fathom always appears alongside the originating primary source(s), e.g. `[Gmail, Fathom]` or `[Orbit, Gmail, Fathom]`.
 
 > Historical note: previous schema versions also offered a `Slack` (purple) option. Existing rows with that tag are preserved as an immutable audit trail; new runs cannot produce it.
 
@@ -281,7 +283,7 @@ When the schema needs to evolve (e.g., adding a column in a future version), use
 | Column | Value |
 |---|---|
 | Summary | `Create subtask on Brother Plesk #109958 — Investigate patch ETA with WP Maintenance. To Atul.` |
-| AI Notes | `Maintenance project type — previously this would have been a Reassign row; new rule unifies on Create subtask under the PM-owned parent.` |
+| AI Notes | `Maintenance project type — previously this would have been a Reassign row; new rule unifies on Create subtask under the PM-owned parent. Fathom enrichment fetched: Orbit comment from Atul referenced "yesterday's WP Maintenance sync" — meeting recording attached as enrichment under Sources.` |
 | Orbit Task Link | `https://app.orbit.io/projects/8461/tasks/109958` |
 | Project | `Brother Site Issues (#8461) — Maintenance` |
 | Recommended Action | `Create subtask under #109958, assign to Atul (WP) + handoff draft` |
@@ -296,7 +298,7 @@ When the schema needs to evolve (e.g., adding a column in a future version), use
 | Column | Value |
 |---|---|
 | Summary | `Create subtask on Conversant Phase 2 #112004 — Hand off Sprint 12 dev planning to Vijay. Due today.` |
-| AI Notes | `Caitlin put this on your plate overnight, due today. Proposed delegate: Vijay Patel (history on project — 3 sprints prior). Gmail thread + Fathom call from yesterday cross-linked under Sources.` |
+| AI Notes | `Caitlin put this on your plate overnight, due today. Proposed delegate: Vijay Patel (history on project — 3 sprints prior). Gmail thread cross-linked under Sources (Job 4b Pass 1). Fathom call from yesterday fetched as enrichment (Job 4b Pass 2 — Caitlin's comment referenced the call).` |
 | Orbit Task Link | `https://app.orbit.io/projects/9012/tasks/112004` |
 | Project | `Conversant Phase 2 (#9012)` |
 | Recommended Action | `Create subtask under #112004, assign to Vijay (FE) + handoff draft` |

@@ -95,13 +95,13 @@ The skill typically creates new projects as `Active` unless the source signal cl
 
 ## Source Systems multi-select values (Morning Queue column)
 
-Three values, one per collector:
+Three values:
 
-- `Orbit` (green)
-- `Gmail` (red)
-- `Fathom` (orange)
+- `Orbit` (green) — primary collection source
+- `Gmail` (red) — primary collection source
+- `Fathom` (orange) — **enrichment-on-demand source**, not primary collection
 
-Each row's Source Systems field is populated with all collectors that contributed at least one signal to the item. Priority-lane rows (Mode 1 Step 3a) always include `Orbit` and may also include `Gmail` and/or `Fathom` when matcher Job 4b cross-linked corroborating context signals.
+Each row's Source Systems field is populated with all sources that contributed to the item. Primary sources (Orbit, Gmail) appear when they originated or corroborated the row. `Fathom` appears ONLY when matcher Job 4b Pass 2 fetched Fathom enrichment for the row (triggered by a meeting reference in a primary signal). A row tagged `[Fathom]` alone is impossible — Fathom never originates a row, so it always appears alongside its triggering primary source(s). Priority-lane rows (Mode 1 Step 3a) always include `Orbit` and may also include `Gmail` (Job 4b Pass 1 cross-link) and/or `Fathom` (Job 4b Pass 2 enrichment).
 
 ## What this reference does NOT cover
 

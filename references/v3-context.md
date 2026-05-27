@@ -14,7 +14,7 @@ Public link: [PM Automations V3](https://www.notion.so/3433846840c88082b79bf6af6
 ## What V3 is NOT
 
 - Not a place this skill writes. Not even auto-comments. Not even auto-citations.
-- Not a primary collection source. The skill's collectors target Orbit / Gmail / Fathom / Notion (the PM's own parent page), not V3.
+- Not a primary collection source. The skill's primary collectors target Orbit / Gmail / Notion (the PM's own parent page); Fathom is enrichment-on-demand only. V3 is none of these.
 - Not editable from any skill code path. The "V3 stays sealed" rule is non-negotiable across every mode, executor, and writer.
 
 ## How files in this skill relate to V3

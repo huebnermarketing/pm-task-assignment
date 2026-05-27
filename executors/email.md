@@ -1,4 +1,4 @@
-> **This executor uses ONLY the Gmail MCP. Source allowlist — primary collection: Orbit, Gmail, Fathom, Notion. Slack is outbound-send only via `executors/slack.md` (team-handoff + AM-ping with explicit PM `send` note). Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever.**
+> **This executor uses ONLY the Gmail MCP. Source allowlist — primary collection: Orbit, Gmail, Notion. Enrichment-on-demand: Fathom (lazy fetch via `collectors/fathom.md`). Slack is outbound-send only via `executors/slack.md` (team-handoff + AM-ping with explicit PM `send` note). Read-only references on demand: Google Drive/Docs/Sheets, SharePoint (see `references/external-doc-access.md`). No other MCP, ever.**
 
 > **Preflight (`preflight.md`) must have run before this executor is invoked.**
 

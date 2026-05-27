@@ -1,6 +1,6 @@
 # connector-failure-notify.md — Failure Fallback Chain
 
-> **When any MCP connector in the primary allowlist fails (Orbit, Gmail, Fathom, Notion), the skill records and surfaces the failure through this fallback chain. Slack is outbound-send only (team-handoff + AM-ping per Mode 2) and failures of the Slack executor route through the same chain. Routines fire unattended, so each tier is fire-and-forget — no tier waits for human input. Read-only reference MCPs (Google Drive/Docs/Sheets, SharePoint per `references/external-doc-access.md`) follow the same retry-with-backoff policy but their failures are non-blocking — they degrade row context but never abort a run.**
+> **When any MCP connector in the primary allowlist fails (Orbit, Gmail, Notion), the skill records and surfaces the failure through this fallback chain. Slack is outbound-send only (team-handoff + AM-ping per Mode 2) and failures of the Slack executor route through the same chain. Fathom is **enrichment-on-demand** (not primary collection) — Fathom failures are **non-blocking**: they are recorded in the run-log and on the Incidents page (Tier 3) but do NOT fire Tier 1 (email PM) or Tier 2 (Notion red callout). Routines fire unattended, so each tier is fire-and-forget — no tier waits for human input. Read-only reference MCPs (Google Drive/Docs/Sheets, SharePoint per `references/external-doc-access.md`) follow the same retry-with-backoff policy but their failures are non-blocking — they degrade row context but never abort a run.**
 
 ## When this fires
 
@@ -49,23 +49,25 @@ Tiers below fire only AFTER the retry policy above has exhausted (or been skippe
 
 The PM's Gmail account sends an email TO themselves (their canonical email or any alias). This is a **sent** email, not a draft — it lands in their inbox like a normal incoming message. This is one of the documented exceptions where the Email Executor sends rather than drafts (see `executors/email.md`).
 
-Template:
+Template (example uses Orbit since Fathom is no longer eligible for Tier 1):
 
 ```
 Subject: 🚨 PM Task Assignment — Connector Failure
 
-Connector: Fathom
+Connector: Orbit
 Time: 25 April 2026, 9:32 AM IST
 Error: MCP server disconnected
 
-What this means: I couldn't pull yesterday's meeting action items into your morning queue.
-What I did: I built the queue without Fathom signals. Today's queue is missing meeting-derived items.
-What you need to do: Re-authenticate the Fathom MCP. The next scheduled routine fire will pick it back up automatically; or run `PM Task Assignment, run morning` to re-collect immediately.
+What this means: I couldn't pull overnight Orbit activity into your morning queue.
+What I did: I built the queue without Orbit signals. Today's queue is missing activity-log items, comments, and overdue tasks.
+What you need to do: Re-authenticate the Orbit MCP. The next scheduled routine fire will pick it back up automatically; or run `PM Task Assignment, run morning` to re-collect immediately.
 
 — PM Task Assignment skill
 ```
 
 If the email succeeds, stop here. Done. (The failure is also written to the Run Log and the Incidents page — see Tier 3.) Tier 2 still runs as a redundant Notion-side trace when the failure occurred on today's Mode 1 / Mode 2 dated page; Tier 3 always runs.
+
+**Fathom is not eligible for Tier 1.** Fathom is enrichment-on-demand, not primary collection. A Fathom MCP failure produces only a Tier 3 Incidents entry plus a run-log line — no PM email and no Notion red callout. The Mode 1 page summary may include a soft note like "Fathom enrichment unavailable — N primary signals were not enriched" but this does not interrupt the PM's morning flow.
 
 ### Tier 2 — Bold-red callout on today's dated Notion page
 
@@ -126,8 +128,8 @@ Sent via `executors/email.md` (operational send exception). Once a successful fi
 |---|---|---|---|
 | Orbit | works | works | always |
 | Gmail | tier 1 fails — skip | works | always |
-| Fathom | works | works | always |
 | Notion | works | tier 2 also fails — skip | tier 3 also fails — record in run-log only |
+| Fathom *(enrichment, non-blocking)* | **skipped — not eligible** | **skipped — not eligible** | always |
 | Slack (outbound-send executor) | works | works | always |
 | All MCPs except Claude | tier 1 fails | tier 2 fails | tier 3 fails — run-log entry is the only trace; backup-escalation email also blocked |
 
@@ -140,15 +142,17 @@ If preflight or a single run detects multiple connector failures, do not send mu
 ```
 Subject: 🚨 PM Task Assignment — Multiple Connector Failures
 
-2 of 4 connectors failed at 9:32 AM IST today:
-  • Fathom — MCP server disconnected
+2 of 3 primary collection connectors failed at 9:32 AM IST today:
+  • Gmail — MCP server disconnected
   • Orbit — auth expired
 
-What this means: today's morning queue is missing Fathom and Orbit signals.
-What you need to do: re-authenticate Fathom and Orbit. The next scheduled routine fire will pick them back up automatically.
+What this means: today's morning queue is missing Gmail and Orbit signals.
+What you need to do: re-authenticate Gmail and Orbit. The next scheduled routine fire will pick them back up automatically.
 ```
 
 One email (or Notion callout, or Incidents-page entry) summarizing all failures. One Run Log line per failure (so the per-connector audit trail stays granular even when the PM-facing message is aggregated).
+
+If Fathom is among the failed connectors in the same run, it appears in the run-log + Incidents page (Tier 3) but NOT in the Tier 1 aggregated email or Tier 2 Notion callout. Mixing a non-blocking Fathom failure into a blocking-failure email would muddy the alert.
 
 ## Rate limiting
 
@@ -169,7 +173,7 @@ Every connector failure also appends a line to the run-log detail page for the c
 Examples:
 
 ```
-Fathom failed at Mode 1 / Step 3b (collector) after 4/4 attempts — MCP server disconnected — fallback tier: 1
+Fathom failed at Mode 1 / Step 4 (matcher Job 4b enrichment fetch) after 4/4 attempts — MCP server disconnected — fallback tier: 3 (non-blocking; enrichment skipped)
 Slack failed at Mode 2 / Step 6 (team-handoff send executor) after 4/4 attempts — auth expired (final) — fallback tier: 1
 Notion failed at Mode 1 / Step 5 (writer) after 1/4 attempts (retry_skipped: 403 permission denied) — fallback tier: 3
 ```

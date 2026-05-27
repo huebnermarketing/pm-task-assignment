@@ -1,6 +1,6 @@
 ---
 name: pm-task-assignment
-description: Automates a WLIQ Project Manager's pre-office morning hour. Mode 1 collects overnight signals — first an Orbit-first priority pass that surfaces parent tasks an AM created or reassigned to the running PM overnight with due_date=today, then a parallel pass over Orbit-normal + Gmail + Fathom (the last two also serving as context enrichment for Orbit signals). Writes a plain-language morning queue to a Notion page with two row types only — `Create subtask` (delegated dev work under a parent task currently assigned to the PM, with the 6-section brief) and `Flag` (PM-attention items the matcher cannot auto-delegate). Executes the approved sub-task creations in Orbit (handoff drafts appended to Notion under each row's Outcome) after the PM approves. Runs as 3 separate Claude Routines (Mode 1 morning collection, Mode 2 execution, monthly archival) on cron; same skill also runs interactively in Claude Desktop or programmatically via Claude Code / SDK (see `ENVIRONMENTS.md`). Manual out-of-routine commands also accepted — e.g. "PM Task Assignment, run morning", "PM Task Assignment, run execution now", "PM Task Assignment, validate setup" — documented in `invocation-commands.md`. Lenient about phrasing — variations like "skill PM task assignment, run my morning" or "PM task assignment run morning" all route correctly.
+description: Automates a WLIQ Project Manager's pre-office morning hour. Mode 1 collects overnight signals — first an Orbit-first priority pass that surfaces parent tasks an AM created or reassigned to the running PM overnight with due_date=today, then a parallel pass over Orbit-normal + Gmail (the two primary collection sources). Fathom is enrichment-only — the matcher lazily fetches meeting context via `collectors/fathom.md` when a primary signal references a call, but Fathom never originates a row. Writes a plain-language morning queue to a Notion page with two row types only — `Create subtask` (delegated dev work under a parent task currently assigned to the PM, with the 6-section brief) and `Flag` (PM-attention items the matcher cannot auto-delegate). Executes the approved sub-task creations in Orbit (handoff drafts appended to Notion under each row's Outcome) after the PM approves. Runs as 3 separate Claude Routines (Mode 1 morning collection, Mode 2 execution, monthly archival) on cron; same skill also runs interactively in Claude Desktop or programmatically via Claude Code / SDK (see `ENVIRONMENTS.md`). Manual out-of-routine commands also accepted — e.g. "PM Task Assignment, run morning", "PM Task Assignment, run execution now", "PM Task Assignment, validate setup" — documented in `invocation-commands.md`. Lenient about phrasing — variations like "skill PM task assignment, run my morning" or "PM task assignment run morning" all route correctly.
 ---
 
 # PM Task Assignment
@@ -9,9 +9,11 @@ description: Automates a WLIQ Project Manager's pre-office morning hour. Mode 1 
 
 ## Source allowlist — read this before touching any tool
 
-This skill uses these MCPs as **primary collection sources**: **Orbit, Gmail, Fathom, Notion**.
+This skill uses these MCPs as **primary collection sources**: **Orbit, Gmail, Notion**.
 
-It uses these MCPs as **on-demand read-only references** when an allowed primary signal links to a file there: **Google Drive, Google Docs, Google Sheets, SharePoint**. Read-only. Never write. Trigger condition: a primary signal (Gmail / Fathom / Orbit / Notion) contains a link or attachment pointing at the document; the skill MAY fetch the doc's content for context. See `references/external-doc-access.md`.
+It uses **Fathom** as an **enrichment-on-demand MCP**: never collected eagerly, never a row of its own. The matcher (`synthesis/matcher.md` Job 4b) detects meeting references inside primary signals (mail / Orbit) using the trigger-phrase list in `collectors/fathom.md`, then lazily fetches the meeting summary, attendees, and relevant action items as enrichment on the originating primary signal. Fathom MCP failure is non-blocking — primary signals still flow.
+
+It uses these MCPs as **on-demand read-only references** when an allowed primary signal links to a file there: **Google Drive, Google Docs, Google Sheets, SharePoint**. Read-only. Never write. Trigger condition: a primary signal (Gmail / Orbit / Notion) contains a link or attachment pointing at the document; the skill MAY fetch the doc's content for context. See `references/external-doc-access.md`.
 
 It uses **Slack** as an **outbound-send-only MCP**, scoped to exactly two paths in Mode 2: (a) team handoff send when the row's PM Note explicitly says `send` AND audience = `team`; (b) AM ping send when the row's PM Note explicitly says `send` AND audience = `am`. Slack is NEVER used for collection (the Slack collector was removed), NEVER for PM self-summary (now a Notion callout block), NEVER for escalation backup (now email-only), NEVER for connector-failure notification (now email-sent → Notion red callout → Incidents). All Slack details live in `executors/slack.md`.
 
@@ -23,9 +25,9 @@ The clause is repeated in `config.md`, in `preflight.md`, and at the top of ever
 
 ## What this skill does
 
-Eliminates the one hour WLIQ Project Managers currently spend from home every morning before the India office opens at 11:00 AM. The PM currently scans Gmail, Fathom, and Orbit for overnight signals, figures out which project each signal belongs to, decides who should pick up each piece of work, writes Orbit tasks with enough context for the assignee to start, then walks desk to desk in the office to brief each team member.
+Eliminates the one hour WLIQ Project Managers currently spend from home every morning before the India office opens at 11:00 AM. The PM currently scans Gmail and Orbit for overnight signals (and occasionally a Fathom recording when an email or comment references one), figures out which project each signal belongs to, decides who should pick up each piece of work, writes Orbit tasks with enough context for the assignee to start, then walks desk to desk in the office to brief each team member.
 
-This skill replaces all of that except the PM's approval moment. Each PM runs the skill on their own Claude account. Their MCP connections (Orbit, Gmail, Fathom, Notion) provide the data. The skill writes the morning's work to a Notion page identified in `config.md`. The PM reviews, approves, and the skill executes.
+This skill replaces all of that except the PM's approval moment. Each PM runs the skill on their own Claude account. Their MCP connections (Orbit, Gmail, Notion as primary; Fathom as enrichment-on-demand) provide the data. The skill writes the morning's work to a Notion page identified in `config.md`. The PM reviews, approves, and the skill executes.
 
 **Execution model.** This skill runs under two surfaces: (1) headless — Claude Routines on cron, or programmatic Claude Code / SDK invocations — never asks questions; (2) interactive — a PM types a manual command in Claude Desktop — may ask one clarifying question per ambiguous item before falling back to `Uncertain:`. Both surfaces share the same preflight, allowlist, writes, plain-language rules, and run-log behavior. The only difference is question-asking. See `ENVIRONMENTS.md` for the surface-detection contract and what is shared. See `ROUTINE-ENTRYPOINTS.md` for the three baked routine prompts; `invocation-commands.md` for the interactive commands.
 
@@ -90,20 +92,21 @@ Mode 1 (scheduled collection):
     → collectors/orbit.md with priority_pass=true
     → Detects parent tasks an AM created or reassigned to the running PM overnight with due_date=today
     → Output: priority_signals[] each carrying parent_task_id + am_actor + bypass_pm_action_filter=true
-  → Step 3b — Call remaining collectors in parallel (Orbit-normal + Gmail + Fathom):
+  → Step 3b — Call remaining primary collectors in parallel (Orbit-normal + Gmail):
     ├─ collectors/orbit.md (normal pass: comments, status changes, overdue, new tasks not in priority pass)
-    ├─ collectors/gmail.md (also emits context-link metadata: project_id_candidates, actor_emails, topic_keywords, timestamp)
-    └─ collectors/fathom.md (same context-link metadata for cross-link in matcher Job 4b)
+    └─ collectors/gmail.md (also emits context-link metadata: project_id_candidates, actor_emails, topic_keywords, timestamp)
+    [Fathom NOT called here — lazy-fetched by matcher in Job 4b only when a primary signal references a meeting]
   → synthesis/matcher.md
     → Job 4: group signals by project
-    → Job 4b: context cross-link — attach corroborating Gmail/Fathom signals to each Orbit signal (priority-lane first)
+    → Job 4b Pass 1: Gmail → Orbit context cross-link (attach corroborating Gmail signals to each Orbit signal, priority-lane first)
+    → Job 4b Pass 2: Fathom enrichment fetch (scan every primary signal for meeting-reference trigger phrases; lazy-call collectors/fathom.md fetch_enrichment() per detected reference; attach EnrichmentResult as signal.enrichment.fathom)
     → Job 5: Create subtask vs Flag classification (priority-lane = always Create subtask, parent pinned to signal.parent_task_id)
     → Job 6: 4-branch assignee tree (history → matrix → floater → cross-matrix Uncertain) — runs for priority-lane too since PM did not pick a delegate
     → PM-action filter: bypass for signals with bypass_pm_action_filter=true
   → synthesis/pod-inference.md — compute pod per project (matrix members ∪ Orbit followers/recent-assignees)
   → writers/notion.md — write today's dated sub-page with inline database + Ready toggle at top
     → Priority-lane rows sort to the top (matcher sort rule 0)
-    → Row detail Sources section renders linked Gmail/Fathom context signals on priority-lane rows
+    → Row detail Sources section renders linked Gmail context signals + Fathom enrichment (when fetched) on priority-lane rows
     → Enforces parent-page structure per schemas/parent-page.md
     → Enforces Morning Queue schema per schemas/morning-queue-database.md
     → Enforces row detail layout per schemas/row-detail-page.md
@@ -144,7 +147,7 @@ Connector failure at any step:
 |---|---|---|
 | **Orbit** | PM's projects (owner + follower + active in last 6 months), activity since last run, attachments. Mode 1 Step 3a priority pass scopes to tasks `assignee_id == PM AND due_date == today` cross-referenced against the AM identity list for the actor that created or reassigned the parent. | `mcp__...orbit.*` |
 | **Gmail** | PM's `@whitelabeliq.com` inbox ONLY (single account, even if other accounts are authenticated). Aliases respected. Overnight window. Filtered for client/AM/team/leadership. Skips Orbit notification emails. Each signal emits context-link metadata (project_id_candidates, actor_emails, topic_keywords, timestamp) so matcher Job 4b can corroborate Orbit signals. | `mcp__...gmail.*` |
-| **Fathom** | Calls PM attended (and missed) in last 24h + action items + recording links. Each signal emits the same context-link metadata as Gmail for matcher Job 4b cross-link. | `mcp__...fathom.*` |
+| **Fathom** *(enrichment-on-demand, not primary collection)* | Fetched lazily by `synthesis/matcher.md` Job 4b Pass 2 when a primary signal references a meeting (per trigger-phrase list in `collectors/fathom.md`). Returns scoped meeting summary excerpt, relevant action items, attendees, recording URL. Never originates a row; never scanned eagerly. Failure is non-blocking — primary signals still flow. | `mcp__...fathom.search_meetings`, `get_summary`, `get_transcript` only |
 | **Notion** | Read Preferences. Write dated sub-pages, inline database, row detail pages. On 1st of month: move previous month into named toggle. ONLY the Notion parent page identified in `config.md`. **Read-only exception:** the Pod Matrix page identified by the runtime-injected `POD_MATRIX_URL` (Mode 1 routine prompt only — see `ROUTINE-ENTRYPOINTS.md`) is allowlisted for `notion-fetch` only; never written. Mode 2 and Monthly Archival do not receive `POD_MATRIX_URL` and do not read the Pod Matrix. | `mcp__...notion.*` |
 
 Explicitly forbidden: Pipedrive, Apollo, Common Room, Hex, Calendar, Keka, Atlassian, Linear, Intercom, Figma, Klaviyo, Ahrefs, Canva, ClickUp, Monday, Fireflies, Pendo, Amplitude, Quickbooks, or any other connector. Google Drive / Docs / Sheets and SharePoint are allowed read-only on-demand only as defined in `references/external-doc-access.md` — never as primary collection sources.
@@ -167,7 +170,7 @@ Explicitly forbidden: Pipedrive, Apollo, Common Room, Hex, Calendar, Keka, Atlas
 14. **Connector failures notify the PM via the 3-tier fallback chain** in `connector-failure-notify.md`: email-sent → Notion red callout on today's dated page → Incidents sub-page. Repeat-failure escalation routes via email to the configured backup. Never silently fail.
 15. **Email aliases are respected.** Identity matching across all collectors and executors uses the canonical email plus any aliases stored in Preferences.
 16. **Every routine fire writes a run-log entry** to the Run Log database on the Notion parent. Brief reason traces (one line per decision: subject → action → reason). See `writers/run-log.md` and `schemas/run-log-database.md`.
-17. **All MCP calls retry with backoff before failing.** Every MCP tool call (any of the 4 allowlisted MCPs) wraps in the retry policy defined in `connector-failure-notify.md`: 4 attempts total (1 + 3 retries), 2s/5s/15s incremental backoff, retry only on transient errors (timeout, 5xx, 429, connection reset). Permanent errors (4xx auth, 404, validation) skip retry. After exhaustion, the failure chain fires. The run-log records all retry attempts.
+17. **All MCP calls retry with backoff before failing.** Every MCP tool call (any of the 3 primary collection MCPs — Orbit, Gmail, Notion — plus the Fathom enrichment MCP, plus the Slack outbound-send MCP) wraps in the retry policy defined in `connector-failure-notify.md`: 4 attempts total (1 + 3 retries), 2s/5s/15s incremental backoff, retry only on transient errors (timeout, 5xx, 429, connection reset). Permanent errors (4xx auth, 404, validation) skip retry. After exhaustion, the failure chain fires for primary MCPs; Fathom exhaustion is non-blocking (logged to Incidents page only, no PM callout). The run-log records all retry attempts.
 
 18. **The Morning Queue drives exactly two AI actions: `Create subtask` (universal across every project type, under a parent task currently assigned to the running PM, with explicit task title + 6-section brief) or `Flag` (PM-attention signal with no auto-execution).** Every other class of signal is either dropped (already handled by the PM overnight, surfaced in Orbit's own UI, hours-overrun alert, third-party automation) or downgraded to Flag. Priority-lane rows (AM handed parent to PM overnight, due today — see Mode 1 Step 3a) are always `Create subtask` with parent_task_id pinned to the AM-assigned parent. See `synthesis/matcher.md` Output gating + Job 11.
 
@@ -196,8 +199,9 @@ Everything below this file provides the detailed behavior. Load the specific fil
 - `modes/mode-1-morning-collection.md` — Mode 1 end-to-end orchestration.
 - `modes/mode-2-execution.md` — Mode 2 end-to-end orchestration.
 - `modes/monthly-archival.md` — 1st-of-month archival at 6:00 AM IST.
-- `collectors/orbit.md`, `gmail.md`, `fathom.md` — per-source data collection. `collectors/orbit.md` documents both the normal pass and the Mode 1 Step 3a priority pass (AM-handed-to-PM detection).
-- `synthesis/matcher.md` — signal grouping, Job 4b context cross-link (Gmail/Fathom → Orbit), and summary generation, alias-aware.
+- `collectors/orbit.md`, `gmail.md` — primary data collection (called by Mode 1 Step 3a/3b). `collectors/orbit.md` documents both the normal pass and the Mode 1 Step 3a priority pass (AM-handed-to-PM detection).
+- `collectors/fathom.md` — **enrichment service** (not a primary collector). Provides `fetch_enrichment(reference, signal_context)` interface called lazily by `synthesis/matcher.md` Job 4b Pass 2 when a primary signal references a meeting.
+- `synthesis/matcher.md` — signal grouping, Job 4b Pass 1 (Gmail → Orbit context cross-link) + Pass 2 (Fathom enrichment fetch), and summary generation, alias-aware.
 - `synthesis/pod-inference.md` — how to compute pod per project from Orbit.
 - `synthesis/note-interpreter.md` — natural-language PM note resolution.
 - `executors/orbit.md`, `email.md`, `slack.md` — per-action-type write operations. `slack.md` is outbound-send only (team-handoff + AM-ping with explicit PM `send` note).
