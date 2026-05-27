@@ -380,23 +380,36 @@ The "put this on your plate overnight, due today" phrasing is intentional — it
 
 The body content depends on the row's action.
 
+#### Mandatory deep-read of the originating Orbit task (applies to every Create-subtask AND Create-parent-task row)
+
+**Always read the Orbit task in full — not just the workload snapshot.** Before composing the 6-section body, the matcher MUST fully understand the originating Orbit task. The workload response from Step 1e returns a static snapshot (title, project, due_date, status, severity, parent_id, description-if-present) and `get_activity_log` returns deltas since `last_run_timestamp` — but **older comments, longer descriptions, and prior status history are NOT in those responses**. Compose the brief blind to that prior history and the delivery team gets a brief that ignores 6 months of prior conversation on the task.
+
+For every task that becomes a Create-subtask or Create-parent-task row, the matcher MUST call:
+
+1. **`get_task_details(task_id)`** — full task body / description / all fields. Default-on, NOT conditional on whether the workload returned a description. The workload's truncation behavior is opaque; trust nothing about completeness.
+2. **`list_task_comments(task_id)`** — full all-time comment history, NOT date-filtered to `last_run_timestamp`. This is the load-bearing call for tasks with long prior conversation. The `get_activity_log` call already pulled in Step 1e covers only the deltas since last_run; the deep comment history (decisions, prior client feedback, AM clarifications, failed attempts, scope changes) lives in older comments that activity_log didn't surface.
+
+These calls fire lazily during Job 7 composition (per-row, on the survivor set after Job 5 — typically 10-30 rows, not the full 30-80 workload size). They are mandatory for the row classes that produce an Orbit body; Flag rows skip these calls since Flag rows don't produce a body.
+
+Pull every fact from the full task + comment history that's relevant to the proposed sub-task — prior decisions, named POCs already involved, failed attempts to avoid, scope clarifications, dependencies, deadlines mentioned in earlier comments. Weave them into the 6-section body per the per-section mapping below.
+
 #### Mandatory email-thread enrichment (applies to every Create-subtask AND Create-parent-task row)
 
-**Always check email — not just when the Orbit brief looks thin.** Before composing the 6-section body, the matcher MUST inspect every Gmail signal attached to this Orbit signal via `context_signals[]` (Pass 1) and every Fathom enrichment attached via `signal.enrichment.fathom` (Pass 2). This is unconditional — it does not depend on whether the originating Orbit task body looks complete. Emails routinely carry nuance, prior decisions, scope tweaks, client constraints, and deadlines that never made it into the formal Orbit task; the proposed sub-task body is the place to surface them so the delivery team sees the whole picture in one place.
+**Always check email — not just when the Orbit brief looks thin.** In addition to the deep-read of the originating Orbit task above, before composing the 6-section body the matcher MUST inspect every Gmail signal attached to this Orbit signal via `context_signals[]` (Pass 1) and every Fathom enrichment attached via `signal.enrichment.fathom` (Pass 2). This is unconditional — it does not depend on whether the originating Orbit task body looks complete. Emails routinely carry nuance, prior decisions, scope tweaks, client constraints, and deadlines that never made it into the formal Orbit task; the proposed sub-task body is the place to surface them so the delivery team sees the whole picture in one place.
 
-For each attached `context_signal` (Gmail) and `enrichment.fathom`:
+For each input source — (a) the originating Orbit task's full details + complete comment history (from the per-row deep-read above), (b) each attached `context_signal` (Gmail thread end-to-end), (c) each attached `enrichment.fathom` (meeting summary + action items + recording URL):
 
-1. **Read the full thread / full enrichment, not just the metadata.** The Gmail collector already pulled every linked thread end-to-end (`collectors/gmail.md` § Full thread context); Pass 2 returned a scoped Fathom summary. Long threads (10+ messages, multi-day) are NOT a reason to skip — they are the reason to read carefully because they often contain the load-bearing context.
-2. **Extract every fact relevant to the sub-task** — proposed deliverable, named stakeholders, dates, blockers, prior decisions, file references, AM clarifications, client questions, sign-offs.
-3. **Weave the extracted facts into the 6-section body** per the mapping below:
-   - **DO** — if the email thread defines the deliverable more precisely than the Orbit task title, use the email phrasing in DO and note the divergence in AI Notes.
-   - **WHY** — pull motivation from AM/client wording in the thread. "Sarah said the board demo is Thursday, that's why this is today" reads better than a generic "client urgency".
-   - **CONTEXT** — surface prior decisions, prior rounds, project phase, named POCs, and dependencies from the thread. This is where long-thread context lands most often.
-   - **DONE WHEN** — if the email lists acceptance criteria ("must work on mobile", "include the legal disclaimer", "preview link to Jane"), they go here verbatim (in plain language).
-   - **SELF-QA** — role-specific items per `schemas/orbit-dq-standard.md`, plus any explicit checks the email called out ("test on Safari iOS specifically").
-   - **REFS** — cite EVERY context source: the Orbit parent task URL, the Gmail thread URL(s), the Fathom recording URL (if any), and any document URLs referenced in the thread (Drive / Docs / Sheets / SharePoint per `references/external-doc-access.md`).
-4. **When email content conflicts with the Orbit task title or body**, prefer the most recent authoritative source (latest AM message, latest client decision). Note the conflict in `ai_notes` with `Uncertain:` prefix if the resolution is unclear — let the PM disambiguate.
-5. **Do not silently truncate.** If a thread is too long to summarize fully, capture the key facts in the body sections and add a one-line pointer in REFS: `Full thread (N messages) at <gmail thread URL>`.
+1. **Read every input in full, not just the metadata.** The Orbit deep-read returned the task body + all comments; the Gmail collector pulled every linked thread end-to-end (`collectors/gmail.md` § Full thread context); Fathom Pass 2 returned a scoped meeting summary. Long content (10+ messages in a thread, dozens of comments on a long-running task, multi-day discussions) is NOT a reason to skip — it is the reason to read carefully because the load-bearing context usually lives there.
+2. **Extract every fact relevant to the sub-task** — proposed deliverable, named stakeholders, dates, blockers, prior decisions, file references, AM clarifications, client questions, sign-offs, prior failed attempts, scope changes.
+3. **Weave the extracted facts into the 6-section body** per the mapping below. All three input sources (Orbit task + comments, Gmail threads, Fathom enrichment) feed the same body sections — the mapping is source-agnostic:
+   - **DO** — if any input source defines the deliverable more precisely than the Orbit task title, use the more precise phrasing in DO and note the divergence in AI Notes.
+   - **WHY** — pull motivation from AM/client wording across all sources. "Sarah said the board demo is Thursday, that's why this is today" reads better than a generic "client urgency".
+   - **CONTEXT** — surface prior decisions, prior rounds, project phase, named POCs, dependencies. This is where long-thread context AND long-comment-history context land most often. Comments older than `last_run_timestamp` (not in the activity_log delta) often hold the load-bearing decisions.
+   - **DONE WHEN** — if any input lists acceptance criteria ("must work on mobile", "include the legal disclaimer", "preview link to Jane"), they go here verbatim (in plain language).
+   - **SELF-QA** — role-specific items per `schemas/orbit-dq-standard.md`, plus any explicit checks any input called out ("test on Safari iOS specifically").
+   - **REFS** — cite EVERY context source: the Orbit parent task URL, the Gmail thread URL(s), the Fathom recording URL (if any), and any document URLs referenced anywhere (Drive / Docs / Sheets / SharePoint per `references/external-doc-access.md`).
+4. **Conflict resolution.** When sources conflict (e.g., email says one deadline, Orbit task description says another), prefer the most recent authoritative source (latest AM message, latest client decision, latest task comment). Note the conflict in `ai_notes` with `Uncertain:` prefix if the resolution is unclear — let the PM disambiguate.
+5. **Do not silently truncate.** If a thread or comment history is too long to summarize fully, capture the key facts in the body sections and add a one-line pointer in REFS: `Full thread (N messages) at <gmail thread URL>` or `Full comment history (M comments) on <orbit task URL>`.
 
 This rule applies to **priority-lane rows especially**: an AM-handed parent task created overnight may have only a one-line title in Orbit ("Conversant Phase 2 Sprint 12 dev planning"), but the thread between the AM and PM about it almost always carries the actual scope, the named delegate the AM has in mind, the deadline reasoning, and the constraints. Without email enrichment the proposed sub-task body would be uselessly thin; with email enrichment it gives the delegate everything they need to start without asking.
 

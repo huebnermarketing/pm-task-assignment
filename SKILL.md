@@ -111,7 +111,12 @@ Mode 1 (scheduled collection — 4 conceptual steps, lettered sub-steps below):
     → 4b. synthesis/matcher.md Jobs 5, 6, 7, 8, 9, 10, 11:
       → Job 5: action classification — one of three locked verbs: Create subtask, Flag, or Create parent task (Possible Orbit miss — Gmail-only critical signal with no Orbit corroboration; project must be unambiguous)
       → Job 6: 4-branch assignee tree (history → matrix → floater → cross-matrix Uncertain) — runs for priority-lane too since PM did not pick a delegate; Create parent task rows short-circuit to PM
-      → Job 7: compose the 6-section Orbit body — MANDATORY email-thread + Fathom enrichment (unconditional; read full thread depth even for long multi-day threads; weave AM clarifications, prior decisions, scope tweaks, client constraints, deadline reasoning into DO/WHY/CONTEXT/DONE-WHEN/REFS sections — the Orbit task body alone is rarely complete enough)
+      → Job 7: compose the 6-section Orbit body — MANDATORY per-row deep-read of FOUR sources (unconditional, default-on):
+        ① Originating Orbit task in full — lazy per-row get_task_details + list_task_comments (full all-time comment history, NOT date-filtered — older comments hold prior decisions / failed attempts / scope changes)
+        ② Every attached Gmail context_signal — thread end-to-end, including long multi-day threads
+        ③ Every signal.enrichment.fathom — meeting summary + action items
+        ④ External docs referenced by any of the above (per references/external-doc-access.md)
+        Weave facts from all four into DO/WHY/CONTEXT/DONE-WHEN/SELF-QA/REFS via the source-agnostic per-section mapping in matcher.md Job 7 + orbit-dq-standard.md § Source rule. The workload snapshot + activity_log delta alone are rarely complete enough.
       → PM-action filter: bypass for signals with bypass_pm_action_filter=true
     → synthesis/pod-inference.md — compute pod per project (matrix members ∪ Orbit followers/recent-assignees)
     → 4c. writers/notion.md — write today's dated sub-page with inline database + Ready toggle at top

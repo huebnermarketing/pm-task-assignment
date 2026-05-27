@@ -117,8 +117,8 @@ This block overrides any inferred "fast path" the runtime might take. Mode 1's n
 1. **`get_user_details`** — PM identity confirmation (id, name, email).
 2. **`get_user_workload` with `user_id == PM_user_id, is_completed=incomplete, per_page=500`** — the **non-skippable** universe-discovery call. Returns the full list of every open task assigned to the PM, with per-task details (project, due_date, status, severity, parent_id, description if present) and summary counts (overdue / due-today / by-project). This is the canonical PM-todo universe for the run; every downstream signal flows from it. Replaces the prior `list_projects` → `get_project_task_list × N` per-project iteration entirely.
 3. **`get_activity_log` with `from_date = last_run_timestamp`** — the **non-skippable** change-history pull. Every comment, status flip, due-date move, new assignment, AM action landing inside the lookback window arrives ONLY via this call. Workload returns the static snapshot; activity_log returns the deltas since last run. Scope: pass the task IDs from step 2 (workload) if the MCP supports task-id filtering; otherwise call user-scoped (events involving PM as actor or target) and cross-reference against the workload task IDs locally. Do NOT iterate per project — that was the old model.
-4. **`list_task_comments`** — fallback for any task flagged by activity log that needs comment-body detail (activity log entries may include comment IDs but not full text).
-5. **`get_task_details`** — for any workload task whose description / body is missing or truncated in the workload response. Skip when workload already returned sufficient detail (typical case).
+4. **`list_task_comments`** — has TWO call patterns: (a) collection-phase fallback for any task flagged by activity log that references a comment by id without the body text; (b) **synthesis-phase per-row deep-read, mandatory** — see § Per-row deep-read below.
+5. **`get_task_details`** — has TWO call patterns: (a) collection-phase fallback for any workload task whose description / body is missing or truncated in the workload response; (b) **synthesis-phase per-row deep-read, mandatory** — see § Per-row deep-read below.
 6. **`get_asset_attachment_summary_with_download_url`** — for any new attachments flagged by activity log on PM-workload tasks.
 7. **`list_clients` / `list_sub_clients` / `list_users`** — relationship-map enrichment for client / sub-client / actor identification on the workload's per-task project info.
 
@@ -161,6 +161,21 @@ For each task in the workload response:
 - Automated bot comments (e.g., "system updated due date").
 - Tasks already surfaced in `priority_signals[]` (deduplicate by task_id between priority and normal passes).
 - Tasks where status is `Archive` (already complete from PM's perspective).
+
+## Per-row deep-read (mandatory, fired by matcher Job 7)
+
+The collection-phase calls above return the universe + the deltas since `last_run_timestamp`, which is enough for the matcher to decide which tasks become rows. But composing the proposed 6-section body for a row requires **deeper context than the workload snapshot or the activity-log delta provides** — specifically, the full task description and the complete comment history (including comments older than `last_run_timestamp`).
+
+For every task that becomes a `Create subtask` or `Create parent task` row (typically 10-30 rows per morning), the matcher's Job 7 lazily fires:
+
+1. **`get_task_details(task_id)`** — full task body, description, all fields. Default-on, NOT gated on whether the workload returned a description. The workload's truncation behavior is opaque; trust nothing about completeness.
+2. **`list_task_comments(task_id)`** — full all-time comment history, NOT date-filtered to `last_run_timestamp`. The collection-phase `get_activity_log` returns deltas since last_run only; older decisions, prior client feedback, AM clarifications, failed attempts, scope changes live in comments from earlier weeks/months that the activity log won't surface.
+
+**Why both calls fire during synthesis, not collection.** Firing at collection time would mean calling `get_task_details` + `list_task_comments` for every task in the workload (typically 30-80), most of which won't become rows after Job 5 filtering — wasted API calls. Firing during Job 7 bounds the calls to the post-filter survivor set (typically 10-30 rows). This mirrors the lazy patterns already established for `fetch_enrichment()` (Fathom, Job 4b Pass 2) and `get_user_workload(candidate_user_id)` (pod-inference, Job 6 no-history fallback).
+
+**Mandatory, not conditional.** Same default-on rule as the Gmail-thread enrichment (see `synthesis/matcher.md` Job 7 § Mandatory email-thread enrichment): do NOT skip these calls because the workload snapshot or the Orbit task title looks "complete enough". The runtime cannot judge completeness without reading; reading first is the only way to know.
+
+**Flag rows skip these calls.** Flag rows do not produce an Orbit body (per matcher Job 7 § Flag path), so the per-row deep-read does not fire. The PM resolves Flag rows manually — they have the Orbit task URL in the row's `orbit_task_link` column and can click through to see comment history themselves.
 
 ## Output shape — per signal
 
