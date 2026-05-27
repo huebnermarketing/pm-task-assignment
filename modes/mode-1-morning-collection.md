@@ -18,7 +18,13 @@ Mode 1's question behavior depends on the `is_interactive` flag set during prefl
 
 ## End-to-end flow
 
-### Step 1 — Read Preferences
+> **PM mental model.** Mode 1 runs in four conceptual steps matching how a PM thinks about the morning: **(1) Pull from Orbit** (todos due today + open items needing attention), **(2) Pull from Mail** (enrichment + critical-miss safety-net), **(3) Enrich with Fathom** for any meeting references (with email-attachment fallback when Fathom is unavailable), **(4) Synthesize, recommend assignees, write to Notion**. The lettered sub-steps below preserve the technical sequencing (preferences, lookback, assertions, run-log, exit) without altering this conceptual flow.
+
+### Step 1 — Pull from Orbit
+
+The four-step PM flow's first conceptual step. Covers: Preferences load, lookback determination, Pod Matrix cache, Orbit priority pass, Orbit normal pass, and the post-collector assertion that protects against silent collector skips.
+
+#### 1a. Read Preferences
 
 Read the Preferences sub-page under the PM's Notion parent. If it doesn't exist, route to `first-run-setup.md` instead and stop.
 
@@ -29,14 +35,14 @@ Extract:
 - Account manager list with preferred channels
 - Default email and handoff-channel preferences, always-include rules, tone samples
 
-### Step 2 — Determine lookback window
+#### 1b. Determine lookback window
 
 - Default: 12 hours (to catch overnight signals).
 - If Preferences has a last-run timestamp: lookback = (now − last_run). This handles PM coming back from leave automatically.
 - **Monday override (IST):** if today is Monday, set `lookback = max(now − last_run, 72 hours)`. Cron is weekday-only, so the previous run was Friday — Monday must always capture the full Fri/Sat/Sun window even if a manual weekend run shrank `last_run`.
 - Cap lookback at 7 days to avoid overwhelming runs.
 
-### Step 2.5 — Load Pod Matrix (cached for the run)
+#### 1c. Load Pod Matrix (cached for the run)
 
 Call `references/pod-matrix.md` to fetch and parse the org Pod Matrix from `POD_MATRIX_URL` (injected by the Mode 1 routine prompt — see `ROUTINE-ENTRYPOINTS.md`).
 
@@ -45,70 +51,127 @@ Call `references/pod-matrix.md` to fetch and parse the org Pod Matrix from `POD_
 
 This step is non-blocking: a matrix outage must never block the morning queue.
 
-### Step 3a — Orbit priority pass (sequential, BLOCKING)
+#### 1d. Orbit priority pass (sequential, BLOCKING)
 
 Call `collectors/orbit.md` with `priority_pass = true`. This pass narrows scope to parent tasks an Account Manager (AM) created or reassigned to the running PM overnight, with `due_date = today`.
 
 Procedure (full details in `collectors/orbit.md` § Priority Pass):
 
-1. Resolve AM identities from Preferences (canonical email + aliases) to Orbit `user_id`s via the cached `list_users` response. The Pod Matrix fetch in Step 2.5 has already populated this cache.
-2. Call `get_project_task_list` with `due_date_filter: "today"` AND `assignee_id == PM_user_id` per project in the PM's universe.
-3. Cross-reference against `get_activity_log` (called below in Step 3b) for the AM actor on either `created_by` or `assignee_change` events since `last_run_timestamp`.
+1. Resolve AM identities from Preferences (canonical email + aliases) to Orbit `user_id`s via the cached `list_users` response. The Pod Matrix fetch in 1c has already populated this cache.
+2. From the PM-workload response (`get_user_workload(PM_user_id, is_completed=incomplete, per_page=500)`, shared with 1e — call once and reuse), filter to tasks where `due_date == today (IST)` AND `assignee_id == PM_user_id`. This is the candidate set — typically a handful of tasks.
+3. Cross-reference against `get_activity_log` (also shared with 1e) for the AM actor on either `created_by` or `assignee_change` events since `last_run_timestamp`.
 4. Return `priority_signals[]`, each carrying `signal_type: am_handed_to_pm_overnight_due_today`, `parent_task_id`, `am_actor_id`, `bypass_pm_action_filter: true`.
 
-This pass is sequential and blocking — Step 3b does not start until Step 3a returns. Rationale: priority-lane signals must lead the queue and must be available to matcher Job 4b as the anchor for context-link cross-referencing.
+This pass is sequential and blocking — 1e (Orbit normal pass) and 2a (Gmail collector) do not start until 1d returns. Rationale: priority-lane signals must lead the queue and must be available to matcher Job 4b as the anchor for context-link cross-referencing. The `get_user_workload(PM)` and `get_activity_log` calls happen here (or in 1e — same result either way since both passes use the same responses); the priority pass simply filters/cross-references first.
 
 If Preferences has zero AMs configured, the priority pass returns an empty list. Log `priority_pass_no_ams_configured` to Run Log and continue. Mode 1 still completes — only the priority lane is empty for this run.
 
-### Step 3b — Remaining primary collectors in parallel
+#### 1e. Orbit normal pass
 
-After Step 3a returns, call the remaining primary collectors in parallel. Do not wait for one before starting the next — they're independent at this stage.
+After 1d returns, fire the Orbit normal pass in parallel with 2a (Gmail collector). They are independent — do not wait for one before starting the other.
 
-- `collectors/orbit.md` (normal pass — `priority_pass = false`) — full Orbit activity since `last_run_timestamp` minus any tasks already surfaced in Step 3a (deduplicate by `task_id`).
-- `collectors/gmail.md` — scoped to PM's inbox, last <lookback_window>. Also emits `context_link` metadata per signal so matcher Job 4b can cross-link to Orbit signals.
+- `collectors/orbit.md` (normal pass — `priority_pass = false`) — universe is `get_user_workload(PM_user_id, is_completed=incomplete, per_page=500)` returning every open task assigned to the PM with full per-task details + summary counts. Activity since `last_run_timestamp` comes from `get_activity_log` (scoped to the workload task IDs). Tasks already surfaced in `priority_signals[]` are deduplicated by `task_id`. **No per-project iteration** — the workload call replaces the old `list_projects` + `get_project_task_list × N` loop entirely. See `collectors/orbit.md` § Universe model for the rationale and § MANDATORY tool call sequence for the exact tool order.
 
-**Fathom is NOT called in this step.** Fathom is enrichment-only and is invoked lazily by the matcher during Step 4 (synthesis) whenever it detects a meeting reference inside a primary signal. See `collectors/fathom.md` for the enrichment interface and trigger-phrase list.
-
-**Role of Gmail.** Gmail does double duty: (a) emit standalone signals where a fresh ask, client question, or action item exists, and (b) carry context-link metadata that `synthesis/matcher.md` Job 4b attaches to corroborating Orbit signals — especially the priority-lane signals from Step 3a. The same Gmail thread between the AM and PM about a priority-lane parent task gets BOTH treatments: it surfaces as Sources context under the priority-lane row, AND (if it contains a fresh ask) may also surface as its own row.
+**Fathom is NOT called in this step.** Fathom is enrichment-only and is invoked lazily by the matcher during Step 3 (Enrich with Fathom) whenever it detects a meeting reference inside a primary signal. See `collectors/fathom.md` for the enrichment interface and trigger-phrase list.
 
 Each collector returns a list of raw signals with source metadata and full context.
 
-If a primary collector fails (MCP unavailable, auth expired), do not abort Mode 1. Log a note and proceed:
-> "Gmail was unavailable this morning — you may want to check manually."
+If the Orbit normal pass fails (MCP unavailable, auth expired), do not abort Mode 1. Log a note and proceed:
+> "Orbit was unavailable this morning — you may want to check manually."
 
-This note is included in the summary section at the top of the dated page. Fathom enrichment failure is **non-blocking** and is logged to the Incidents page only (no PM callout) — see `connector-failure-notify.md`.
+This note is included in the summary section at the top of the dated page.
 
-### Step 3.5 — Post-collector assertion (MANDATORY)
+#### 1f. Post-collector assertion (MANDATORY)
 
-Before passing signals to the matcher, verify the Orbit collector actually invoked its non-skippable tool sequence in BOTH the priority pass (Step 3a) and the normal pass (Step 3b). This guards against the runtime LLM taking a "fast path" that pulls workload metadata only and silently drops every comment + activity-log entry inside the lookback window.
+Before passing signals to the matcher (Step 4), verify the Orbit collector actually invoked its non-skippable tool sequence in BOTH the priority pass (1d) and the normal pass (1e). This guards against the runtime LLM taking a "fast path" that pulls workload metadata only and silently drops every comment + activity-log entry inside the lookback window.
 
 Additional priority-pass assertion: if `priority_signals[]` is non-empty, every entry must carry `bypass_pm_action_filter: true`. The matcher reads this flag to skip the PM-action drop rule (non-negotiable rule #19) for priority-lane signals. If the flag is missing on any priority signal, log `priority_pass_missing_bypass_flag` to Run Log and patch the flag to `true` before passing to the matcher.
 
 Run the following checks on the Mode 1 tool trace and Orbit signals list:
 
-1. **`get_activity_log` call count must be ≥ 1.** If zero, abort Mode 1 with a hard error. Write the dated page with a single callout block at the top: `Mode 1 aborted — Orbit collector skipped get_activity_log. No queue generated. See Run Log for trace.` Log to Run Log with code `mode1_abort: orbit_activity_log_skipped`. Do NOT write a queue database. Do NOT proceed to synthesis. The PM sees a clear failure on the page instead of a misleadingly-clean queue built on incomplete data.
+1. **`get_user_workload(PM_user_id, ...)` call count must be ≥ 1.** This is the universe-discovery call — every Orbit signal flows from its response. If zero, abort Mode 1 with a hard error. Write the dated page with a single callout block at the top: `Mode 1 aborted — Orbit collector skipped get_user_workload(PM). No queue generated. See Run Log for trace.` Log to Run Log with code `mode1_abort: orbit_user_workload_skipped`. Do NOT write a queue database. Do NOT proceed to synthesis.
 
-2. **Orbit signals list contains ≥ 1 entry with `signal_type` in {`activity_log_entry`, `new_comment`, `status_change`, `new_task`}** — OR — the Orbit activity log call returned a documented empty result (`{}` / `data: []`) for every project in the universe. If the call count is 1+ but signals contain zero of those types AND at least one project returned non-empty activity, log a warning `orbit_collector_signals_dropped` to Run Log and continue. The PM will see "0 Orbit signals captured this morning" in the page summary as a soft flag.
+2. **`get_activity_log` call count must be ≥ 1.** This is the change-detection call — workload returns the static snapshot; activity_log returns the deltas since `last_run_timestamp`. If zero, abort Mode 1 with a hard error. Write the dated page with a single callout block at the top: `Mode 1 aborted — Orbit collector skipped get_activity_log. No queue generated. See Run Log for trace.` Log to Run Log with code `mode1_abort: orbit_activity_log_skipped`. Do NOT write a queue database. Do NOT proceed to synthesis. The PM sees a clear failure on the page instead of a misleadingly-clean queue built on incomplete data.
 
-3. **Tool trace must show NO `get_user_workload` calls outside the no-history fallback path.** `get_user_workload` is reserved for `synthesis/pod-inference.md` per `SKILL.md` non-negotiable rule #6. If `get_user_workload` was called before any `get_activity_log` call (i.e., used as a substitute), log warning `orbit_collector_used_workload_as_substitute` and continue — the assertion in #1 has already caught the deeper miss.
+3. **Orbit signals list contains ≥ 1 entry with `signal_type` in {`activity_log_entry`, `new_comment`, `status_change`, `new_task`, `overdue_task`}** — OR — the PM's workload was empty (PM has zero open tasks today, rare but legitimate) — OR — the workload was non-empty but `get_activity_log` returned a documented empty result (no changes since last_run). If the workload is non-empty AND activity_log returned non-empty results AND signals contain zero of those types, log a warning `orbit_collector_signals_dropped` to Run Log and continue. The PM will see "0 Orbit signals captured this morning" in the page summary as a soft flag.
 
-Output of this step: either a hard abort (case 1) or a clean signals list with warnings logged (cases 2–3). Only on clean pass does synthesis run.
+4. **Tool trace MUST show `get_user_workload(PM_user_id, ...)` — and SHOULD show `get_user_workload(candidate_user_id, ...)` only on the no-history fallback path.** Per `SKILL.md` non-negotiable rule #6 there are two valid uses of `get_user_workload`: (a) PM-workload universe discovery in this collector (always fires, checked by assertion #1), (b) candidate-availability scoring in `synthesis/pod-inference.md` on the matcher Job 6 no-history fallback path (lazy). If `get_user_workload` was called with a `user_id` other than the PM AND no matcher Job 6 no-history fallback path actually fired this run, log warning `orbit_workload_candidate_call_unexpected` and continue. This catches accidental candidate-availability fan-out.
 
-### Step 4 — Synthesize
+Output of this step: either a hard abort (cases 1 or 2) or a clean signals list with warnings logged (cases 3–4). Only on clean pass does synthesis run.
 
-Feed all collected signals into `synthesis/matcher.md`. The matcher:
-- Groups signals by client + project using the Orbit relationship map (Job 1)
-- **Runs Job 4b context cross-link + Fathom enrichment fetch** — for each Orbit signal (priority-lane first, then normal-pass), scan Gmail signals for corroborating context via project_id / actor_emails / topic_keywords / ±24h time proximity, and attach matched Gmail signals as `context_signals[]` on the Orbit signal. Cross-linking is additive — the same Gmail signal may also become its own row if it contains a fresh ask. Independently, scan EVERY primary signal (Orbit-priority + Orbit-normal + Gmail) for meeting-reference trigger phrases per `collectors/fathom.md`; for each detected reference, lazily call `collectors/fathom.md` `fetch_enrichment()` and attach the returned `EnrichmentResult` as `enrichment.fathom` on the originating signal. Fathom never originates a row.
-- Generates a one-line plain-language summary per item (normal English — PM reads this)
-- Flags items as `Uncertain:` when it can't confidently group or classify
-- Recommends an action per item. Priority-lane signals always become `Create subtask` rows with `parent_task_id` PINNED to `signal.parent_task_id` (the AM-assigned parent the PM is currently the assignee on).
-- Calls `synthesis/pod-inference.md` to compute the candidate pool per project (matrix members ∪ Orbit followers/recent-assignees)
-- Picks the assignee via the 4-branch decision tree in `synthesis/matcher.md` Job 6: history wins → matrix availability → floater availability → cross-matrix Uncertain. Availability calls (`get_user_workload`) fire only on the no-history fallback path. Priority-lane rows run the same tree — PM did not pick a delegate; matcher suggests one.
-- For priority-lane rows, writes AI Notes in the form: `<AM full name> put this on your plate overnight, due today. Proposed delegate: <name> (<reason>).`
-- Skips the PM-action drop rule (non-negotiable #19) for any signal carrying `bypass_pm_action_filter: true`
-- Sort rule 0 surfaces priority-lane rows at the top of the queue, ahead of all other ordering heuristics
+### Step 2 — Pull from Mail
 
-### Step 5 — Write to Notion
+The four-step PM flow's second conceptual step. Covers: Gmail collection, plus a cross-reference note for the matcher's Possible-Orbit-miss detection.
+
+#### 2a. Gmail collector
+
+Fires in parallel with 1e (Orbit normal pass) — they are independent, do not wait. Same lookback window as 1e (`<lookback_window>` from 1b).
+
+- `collectors/gmail.md` — scoped to PM's WLIQ inbox, last <lookback_window>. Also emits `context_link` metadata per signal so matcher Job 4b can cross-link to Orbit signals.
+
+**Role of Gmail — three duties, all default-on.** Gmail serves three purposes simultaneously, all of which apply to every Mode 1 run regardless of how the Orbit signals look:
+
+1. **Emit standalone signals** where a fresh ask, client question, or action item exists that the matcher will turn into its own row.
+2. **Carry context-link metadata** that `synthesis/matcher.md` Job 4b Pass 1 attaches to EVERY Orbit signal — priority-lane and normal-pass alike. This is the default context-enrichment path: the matcher must check whether a related email thread exists for each Orbit signal and link the thread end-to-end via the Gmail collector's full-thread pull. **The bias is over-include context, not under-include.** Emails carry nuance — AM clarifications, prior decisions, client constraints, scope tweaks, deadline reasoning — that the Orbit task body rarely captures. The proposed Orbit sub-task body composed in matcher Job 7 MUST read through the attached email threads (even long, multi-day threads) and weave anything load-bearing into the DO / WHY / CONTEXT / DONE-WHEN / SELF-QA / REFS sections.
+3. **Safety net for missed Orbit critical items** (Possible-Orbit-miss detection, executed in matcher Job 5 — see 2b below).
+
+The same Gmail thread between the AM and PM about a priority-lane parent task gets ALL THREE treatments: it surfaces as Sources context under the priority-lane row, it enriches the proposed sub-task body in Job 7, AND (if it contains a fresh ask) may also surface as its own row.
+
+If Gmail fails (MCP unavailable, auth expired), do not abort Mode 1. Log a note and proceed:
+> "Gmail was unavailable this morning — you may want to check manually."
+
+This note is included in the summary section at the top of the dated page.
+
+#### 2b. Possible-Orbit-miss safety-net (cross-reference to matcher)
+
+The matcher (`synthesis/matcher.md` Job 5 § Possible Orbit miss detection) inspects every Gmail signal for the following pattern: empty `context_signals[]` after Job 4b Pass 1 AND no PM-owned Orbit task on candidate projects AND critical-language tokens (`urgent`, `asap`, `today`, `eod`, `blocker`, `escalation`, etc.) AND external sender. When all four hold and project resolution is unambiguous, the matcher emits a `Create parent task` row tagged `Possible Orbit miss:` — Mode 2 will create a parent Orbit task on the resolved project assigned to the PM on approval.
+
+This detection is executed inside the matcher (Step 4), not by the Gmail collector. Documented here under Step 2 as a cross-reference for the PM mental model: pulling mail also serves as the safety net that catches critical items the PM may have missed on the Orbit side.
+
+### Step 3 — Enrich with Fathom (lazy, on-demand)
+
+The four-step PM flow's third conceptual step. Covers: matcher trigger-phrase detection, lazy Fathom enrichment fetch, and Gmail-attachment fallback when Fathom is unavailable. Executed inside the matcher's Job 4b Pass 2 — documented here under its own parent step because it is conceptually independent of Job 5+ (which is the assignment/recommendation work in Step 4).
+
+#### 3a. Matcher Job 4b Pass 2 trigger-phrase detection
+
+For each primary signal (Orbit-priority + Orbit-normal + Gmail), scan for meeting-reference trigger phrases per the trigger-phrase list in `collectors/fathom.md`: direct-callback phrases (`"per our call"`, `"as discussed"`, etc.), meeting-title cites, attendee cites, `fathom.video/<id>` URLs, date+meeting references. Each detected reference becomes a candidate for enrichment fetch.
+
+#### 3b. `fetch_enrichment()` calls per detected meeting reference
+
+For each detected reference, call `collectors/fathom.md` `fetch_enrichment(reference, signal_context)`. The service picks the cheapest tool call per the lookup-strategy table (direct ID lookup, title search, attendee+date search, etc.). When a meeting is found, the service returns a scoped `EnrichmentResult` (summary excerpt scoped to the primary signal's project/actors; relevant action items only). The matcher attaches the result as `signal.enrichment.fathom` on the originating signal.
+
+#### 3c. Gmail-attachment fallback when Fathom returns null (new)
+
+When `fetch_enrichment()` returns `null` (Fathom MCP down OR no matching meeting found), Job 4b Pass 2 calls `gmail.find_transcript_in_email()` against the already-collected Gmail signal list (`collectors/gmail.md` § Transcript fallback). The helper searches Fathom-sender / attendee-sender emails ±2 days around the meeting reference for transcript-shaped attachments — no new Gmail MCP calls. If found, an `EnrichmentResult` with `enrichment_source: "gmail_attachment_fallback"` is attached as `signal.enrichment.fathom`. If the fallback also returns null, only then does the primary signal flow into Step 4 without any enrichment, and the Incidents log entry fires once per Mode 1 run with format: `Fathom enrichment unavailable AND no email-attachment fallback found for N primary signals.`
+
+Fathom enrichment failure (and fallback failure) is **non-blocking** and is logged to the Incidents page only (no PM callout) — see `connector-failure-notify.md`.
+
+### Step 4 — Synthesize, recommend, write & log
+
+The four-step PM flow's fourth conceptual step. Covers: the rest of the matcher's jobs (group / dedup / uncertainty / summary / cross-link / action / assignee / body / handoff / email / notes / filtered trace), Notion write, Preferences last-run timestamp update, run-log append, and silent exit.
+
+#### 4a. Matcher Jobs 1, 2, 3, 4, 4b Pass 1
+
+Feed all collected signals (Orbit priority-lane + Orbit normal-pass + Gmail, each with any Fathom/gmail-attachment enrichment attached from Step 3) into `synthesis/matcher.md`. Jobs 1 through 4b Pass 1:
+
+- **Job 1 — Group by project.** Use the Orbit relationship map to connect each signal to a project.
+- **Job 2 — Dedup across sources.** Merge signals that are about the same item (same project + same topic + same actors + ±24h window OR explicit cite).
+- **Job 3 — Uncertainty handling.** No probable-match grouping — list separately with `Uncertain:` AI Note.
+- **Job 4 — Generate the one-line summary.** Action-led, verb-first, locked to three verbs (`Create subtask`, `Flag`, `Create parent task`) per the matcher's locked-vocabulary rules.
+- **Job 4b Pass 1 — Gmail → Orbit cross-link (default-on enrichment).** For EVERY Orbit signal (priority-lane and normal-pass), scan Gmail signals for corroborating context via project_id / actor_emails / topic_keywords / ±7-day time proximity, and attach matched Gmail signals as `context_signals[]` on the Orbit signal. The Gmail collector pulls the full thread end-to-end per `collectors/gmail.md` § Full thread context, so each attached signal carries every message in the thread — Job 7 reads through them when composing the proposed Orbit body. The bias is over-include — even weak matches attach. Cross-linking is additive — the same Gmail signal may also become its own row if it contains a fresh ask.
+
+#### 4b. Matcher Jobs 5, 6, 7, 8, 9, 10, 11
+
+- **Job 5 — Recommend action.** Pick exactly one of three locked actions: `Create subtask` (under PM-owned parent), `Flag` (PM-attention only), or `Create parent task` (Possible Orbit miss — Gmail-only critical signal with no Orbit corroboration; project must be unambiguous). Priority-lane signals always become `Create subtask` rows with `parent_task_id` PINNED to `signal.parent_task_id`.
+- **Job 6 — Recommend assignee.** Call `synthesis/pod-inference.md` for the candidate pool. Pick via the 4-branch decision tree (history wins → matrix availability → floater availability → cross-matrix Uncertain). Availability calls (`get_user_workload`) fire only on the no-history fallback path. Create parent task rows short-circuit to PM (no pod inference).
+- **Job 7 — Generate proposed Orbit body** (Create subtask + Create parent task paths). Full 6-section body per `schemas/orbit-dq-standard.md`, plain language. **Mandatory email-thread + Fathom enrichment**: before composing the body, read through every attached `context_signal` (Gmail thread end-to-end, including long multi-day threads) AND every `signal.enrichment.fathom` (meeting summary + action items) and weave their facts into DO / WHY / CONTEXT / DONE-WHEN / SELF-QA / REFS. This is unconditional — not gated on whether the Orbit task body looks complete. See `synthesis/matcher.md` Job 7 § Mandatory email-thread enrichment. Flag rows skip body generation but still render the email/meeting context in row detail Sources.
+- **Job 8 — Generate proposed handoff** (Create subtask path only). Plain-language team handoff draft. Flag + Create parent task rows skip this (no delegate).
+- **Job 9 — Generate proposed email.** Skipped under current Output gating (PM handles emails outside the queue).
+- **Job 10 — Write AI Notes.** Including `Uncertain:` flags and `Possible Orbit miss:` tags as applicable.
+- **Job 11 — Emit Filtered signals trace.** For every signal the Output gating filter dropped, record source / summary / filter_reason / citations into the `filtered_signals` array. Writer renders this as a collapsible section on the Run Log detail page.
+- **Sort rule 0** surfaces priority-lane rows at the top of the queue, ahead of all other ordering heuristics.
+
+#### 4c. Write to Notion
 
 Call `writers/notion.md` to:
 1. Archive last month's dated pages if today is the 1st (route to `modes/monthly-archival.md` first, then return)
@@ -128,25 +191,25 @@ Call `writers/notion.md` to:
    - AI Notes heading
    - Reference Context toggle at the bottom (labeled — skill's working memory)
 
-### Step 6 — Update last-run timestamp
+#### 4d. Update last-run timestamp
 
 Update the Preferences page's `last_morning_run` field to now.
 
 > **Note:** Mode 2 (execution) and the escalation check are pre-scheduled as separate Claude Routines. Mode 1 does NOT register them in-skill. The `scheduled-tasks` MCP is no longer in the allowlist — routines themselves are the scheduler.
 
-### Step 7 — Append run-log entry
+#### 4e. Append run-log entry
 
 Call `writers/run-log.md` with the run summary:
 - Timestamp range (start → end of this Mode 1 fire)
-- Source counts per primary collector (Orbit / Gmail signal counts) + Fathom enrichments fetched (N enrichments attached, M references unresolved)
+- Source counts per primary collector (Orbit / Gmail signal counts) + Fathom enrichments fetched (N enrichments attached, M references unresolved, K resolved via gmail-attachment fallback)
 - Item count written to today's queue
-- Decisions list (key synthesis decisions, especially `Uncertain:` flags and assignee picks)
+- Decisions list (key synthesis decisions, especially `Uncertain:` flags, `Possible Orbit miss:` flags, and assignee picks)
 - Connector status (which MCPs were healthy, which degraded, which failed)
 - Page title actually written (including any `(rerun N)` suffix)
 
 The writer creates a row in the Run Log database on the Notion parent and a linked decision-trace detail page. This is how a stateless routine fire leaves a trace for the next fire and for the PM's audit.
 
-### Step 8 — Exit silently
+#### 4f. Exit silently
 
 Mode 1 does not notify the PM on completion. The PM will open Notion on their own schedule. No email, no push. Silent.
 

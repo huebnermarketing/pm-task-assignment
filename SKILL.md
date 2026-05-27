@@ -1,6 +1,6 @@
 ---
 name: pm-task-assignment
-description: Automates a WLIQ Project Manager's pre-office morning hour. Mode 1 collects overnight signals — first an Orbit-first priority pass that surfaces parent tasks an AM created or reassigned to the running PM overnight with due_date=today, then a parallel pass over Orbit-normal + Gmail (the two primary collection sources). Fathom is enrichment-only — the matcher lazily fetches meeting context via `collectors/fathom.md` when a primary signal references a call, but Fathom never originates a row. Writes a plain-language morning queue to a Notion page with two row types only — `Create subtask` (delegated dev work under a parent task currently assigned to the PM, with the 6-section brief) and `Flag` (PM-attention items the matcher cannot auto-delegate). Executes the approved sub-task creations in Orbit (handoff drafts appended to Notion under each row's Outcome) after the PM approves. Runs as 3 separate Claude Routines (Mode 1 morning collection, Mode 2 execution, monthly archival) on cron; same skill also runs interactively in Claude Desktop or programmatically via Claude Code / SDK (see `ENVIRONMENTS.md`). Manual out-of-routine commands also accepted — e.g. "PM Task Assignment, run morning", "PM Task Assignment, run execution now", "PM Task Assignment, validate setup" — documented in `invocation-commands.md`. Lenient about phrasing — variations like "skill PM task assignment, run my morning" or "PM task assignment run morning" all route correctly.
+description: Automates a WLIQ Project Manager's pre-office morning hour. Mode 1 runs in four conceptual steps matching how the PM thinks about the morning — (1) Pull from Orbit (priority pass for AM-handed parent tasks due today, then normal pass), (2) Pull from Mail (Gmail enrichment + safety-net for critical signals missed from Orbit), (3) Enrich with Fathom (lazy fetch when a primary signal references a meeting; Gmail-attachment fallback if Fathom is unavailable), (4) Synthesize + recommend assignees + write. Writes a plain-language morning queue to a Notion page with three row types — `Create subtask` (delegated dev work under a parent task currently assigned to the PM, with the 6-section brief), `Flag` (PM-attention items the matcher cannot auto-delegate), and `Create parent task` (Possible Orbit miss — Gmail-only critical signal with no corroborating Orbit task; Mode 2 creates the parent on PM approval). Executes the approved sub-task and parent-task creations in Orbit (handoff drafts appended to Notion under each row's Outcome) after the PM approves. Runs as 3 separate Claude Routines (Mode 1 morning collection, Mode 2 execution, monthly archival) on cron; same skill also runs interactively in Claude Desktop or programmatically via Claude Code / SDK (see `ENVIRONMENTS.md`). Manual out-of-routine commands also accepted — e.g. "PM Task Assignment, run morning", "PM Task Assignment, run execution now", "PM Task Assignment, validate setup" — documented in `invocation-commands.md`. Lenient about phrasing — variations like "skill PM task assignment, run my morning" or "PM task assignment run morning" all route correctly.
 ---
 
 # PM Task Assignment
@@ -84,33 +84,45 @@ EVERY ENTRY POINT (scheduled or manual):
   → If preflight succeeds → continue to mode/command logic
   → If preflight fails → connector-failure-notify.md or first-run-setup.md or abort
 
-Mode 1 (scheduled collection):
+Mode 1 (scheduled collection — 4 conceptual steps, lettered sub-steps below):
   → preflight
-  → Read Preferences (already loaded by preflight)
-  → references/pod-matrix.md — fetch + parse Pod Matrix from POD_MATRIX_URL (cached for run; gracefully degrades to Orbit-only on absence/failure)
-  → Step 3a — Orbit priority pass (sequential, blocking):
-    → collectors/orbit.md with priority_pass=true
-    → Detects parent tasks an AM created or reassigned to the running PM overnight with due_date=today
-    → Output: priority_signals[] each carrying parent_task_id + am_actor + bypass_pm_action_filter=true
-  → Step 3b — Call remaining primary collectors in parallel (Orbit-normal + Gmail):
-    ├─ collectors/orbit.md (normal pass: comments, status changes, overdue, new tasks not in priority pass)
-    └─ collectors/gmail.md (also emits context-link metadata: project_id_candidates, actor_emails, topic_keywords, timestamp)
-    [Fathom NOT called here — lazy-fetched by matcher in Job 4b only when a primary signal references a meeting]
-  → synthesis/matcher.md
-    → Job 4: group signals by project
-    → Job 4b Pass 1: Gmail → Orbit context cross-link (attach corroborating Gmail signals to each Orbit signal, priority-lane first)
-    → Job 4b Pass 2: Fathom enrichment fetch (scan every primary signal for meeting-reference trigger phrases; lazy-call collectors/fathom.md fetch_enrichment() per detected reference; attach EnrichmentResult as signal.enrichment.fathom)
-    → Job 5: Create subtask vs Flag classification (priority-lane = always Create subtask, parent pinned to signal.parent_task_id)
-    → Job 6: 4-branch assignee tree (history → matrix → floater → cross-matrix Uncertain) — runs for priority-lane too since PM did not pick a delegate
-    → PM-action filter: bypass for signals with bypass_pm_action_filter=true
-  → synthesis/pod-inference.md — compute pod per project (matrix members ∪ Orbit followers/recent-assignees)
-  → writers/notion.md — write today's dated sub-page with inline database + Ready toggle at top
-    → Priority-lane rows sort to the top (matcher sort rule 0)
-    → Row detail Sources section renders linked Gmail context signals + Fathom enrichment (when fetched) on priority-lane rows
-    → Enforces parent-page structure per schemas/parent-page.md
-    → Enforces Morning Queue schema per schemas/morning-queue-database.md
-    → Enforces row detail layout per schemas/row-detail-page.md
-  → writers/run-log.md — append run entry to Run Log database
+  → Step 1 — Pull from Orbit:
+    → 1a. Read Preferences (already loaded by preflight)
+    → 1b. Determine lookback window (default 12h, Monday override = max(now − last_run, 72h))
+    → 1c. references/pod-matrix.md — fetch + parse Pod Matrix from POD_MATRIX_URL (cached for run; gracefully degrades to Orbit-only on absence/failure)
+    → 1d. Orbit priority pass (sequential, blocking):
+      → collectors/orbit.md with priority_pass=true
+      → Detects parent tasks an AM created or reassigned to the running PM overnight with due_date=today
+      → Output: priority_signals[] each carrying parent_task_id + am_actor + bypass_pm_action_filter=true
+    → 1e. Orbit normal pass (parallel with 2a):
+      → collectors/orbit.md (normal pass: comments, status changes, overdue, new tasks not in priority pass)
+      [Fathom NOT called here — lazy-fetched by matcher in Step 3 only when a primary signal references a meeting]
+    → 1f. Post-collector assertion (MANDATORY) — abort if Orbit's get_activity_log was skipped
+  → Step 2 — Pull from Mail:
+    → 2a. collectors/gmail.md (parallel with 1e) — Gmail signals + context-link metadata (project_id_candidates, actor_emails, topic_keywords, timestamp)
+    → 2b. Possible-Orbit-miss safety-net (cross-reference to matcher Job 5; executed during Step 4)
+  → Step 3 — Enrich with Fathom (lazy, on-demand):
+    → 3a. Matcher Job 4b Pass 2 — scan every primary signal for meeting-reference trigger phrases per collectors/fathom.md
+    → 3b. fetch_enrichment(reference, signal_context) per detected reference — attach EnrichmentResult as signal.enrichment.fathom
+    → 3c. Gmail-attachment fallback (NEW) — when fetch_enrichment returns null, call gmail.find_transcript_in_email() against the already-collected Gmail signal list; if found, attach as signal.enrichment.fathom with enrichment_source: "gmail_attachment_fallback"
+    [Failure of both Fathom AND fallback is non-blocking — logged to Incidents only]
+  → Step 4 — Synthesize, recommend, write & log:
+    → 4a. synthesis/matcher.md Jobs 1, 2, 3, 4, 4b Pass 1 (group / dedup / uncertainty / summary / Gmail → Orbit cross-link)
+    → 4b. synthesis/matcher.md Jobs 5, 6, 7, 8, 9, 10, 11:
+      → Job 5: action classification — one of three locked verbs: Create subtask, Flag, or Create parent task (Possible Orbit miss — Gmail-only critical signal with no Orbit corroboration; project must be unambiguous)
+      → Job 6: 4-branch assignee tree (history → matrix → floater → cross-matrix Uncertain) — runs for priority-lane too since PM did not pick a delegate; Create parent task rows short-circuit to PM
+      → Job 7: compose the 6-section Orbit body — MANDATORY email-thread + Fathom enrichment (unconditional; read full thread depth even for long multi-day threads; weave AM clarifications, prior decisions, scope tweaks, client constraints, deadline reasoning into DO/WHY/CONTEXT/DONE-WHEN/REFS sections — the Orbit task body alone is rarely complete enough)
+      → PM-action filter: bypass for signals with bypass_pm_action_filter=true
+    → synthesis/pod-inference.md — compute pod per project (matrix members ∪ Orbit followers/recent-assignees)
+    → 4c. writers/notion.md — write today's dated sub-page with inline database + Ready toggle at top
+      → Priority-lane rows sort to the top (matcher sort rule 0)
+      → Row detail Sources section renders linked Gmail context signals + Fathom enrichment (when fetched) on priority-lane rows
+      → Enforces parent-page structure per schemas/parent-page.md
+      → Enforces Morning Queue schema per schemas/morning-queue-database.md
+      → Enforces row detail layout per schemas/row-detail-page.md
+    → 4d. Update last-run timestamp in Preferences
+    → 4e. writers/run-log.md — append run entry to Run Log database (with Fathom enrichment counts: N attached, M references unresolved, K resolved via gmail-attachment fallback)
+    → 4f. Exit silently
 
 Mode 2 (scheduled execution):
   → preflight
@@ -119,10 +131,12 @@ Mode 2 (scheduled execution):
   → If ON:
     → For each row: read Status + PM Notes
     → synthesis/note-interpreter.md — resolve PM note intent
-    → Route to executors:
-      ├─ executors/orbit.md (tasks, projects, comments, due dates; priority-lane sub-tasks pin parent_task_id to the AM-assigned parent)
+    → Route by row verb to executors:
+      ├─ executors/orbit.md — Create subtask path (parent_id = parent_task_id, assignee = recommended_assignee; priority-lane sub-tasks pin parent_task_id to the AM-assigned parent)
+      ├─ executors/orbit.md — Create parent task path (Possible Orbit miss; parent_id = null, assignee = PM, project_id = matcher-resolved; due_date derived from urgency tokens if present)
+      ├─ Flag rows — no executor; PM resolves externally and marks Skip manually
       └─ executors/email.md (drafts only, plus the 2 documented send-not-draft exceptions: connector-failure tier 1, escalation backup ping)
-    → writers/notion.md — write Done state + Outcome per row; team/AM handoffs always draft to the row's Outcome block (PM copies + sends)
+    → writers/notion.md — write Done state + Outcome per row; team/AM handoffs always draft to the row's Outcome block (PM copies + sends). Create parent task rows generate no handoff (no delegate)
     → writers/plain-language.md — enforce language rule on outputs
     → writers/source-citation.md — cite every source in Orbit task bodies and elsewhere
     → writers/run-log.md — append run entry
@@ -145,7 +159,7 @@ Connector failure at any step:
 
 | Source | Scope | Tool family |
 |---|---|---|
-| **Orbit** | PM's projects (owner + follower + active in last 6 months), activity since last run, attachments. Mode 1 Step 3a priority pass scopes to tasks `assignee_id == PM AND due_date == today` cross-referenced against the AM identity list for the actor that created or reassigned the parent. | `mcp__...orbit.*` |
+| **Orbit** | The PM's open task list — every task where `assignee_id == PM_user_id` returned by a single `get_user_workload(PM)` call. Plus `get_activity_log` for changes since last run (status flips, new comments, assignment changes, due-date moves) scoped to the workload task IDs. Plus attachments for tasks with new attachment activity. The Mode 1 sub-step 1d priority pass filters the workload to `due_date == today` and cross-references the activity log for AM-created / AM-reassigned events overnight. **User-centric universe — no per-project iteration.** Tasks the PM follows but is not assigned to are out of scope here (they surface via Gmail if relevant). See `collectors/orbit.md` § Universe model. | `mcp__...orbit.*` |
 | **Gmail** | PM's `@whitelabeliq.com` inbox ONLY (single account, even if other accounts are authenticated). Aliases respected. Overnight window. Filtered for client/AM/team/leadership. Skips Orbit notification emails. Each signal emits context-link metadata (project_id_candidates, actor_emails, topic_keywords, timestamp) so matcher Job 4b can corroborate Orbit signals. | `mcp__...gmail.*` |
 | **Fathom** *(enrichment-on-demand, not primary collection)* | Fetched lazily by `synthesis/matcher.md` Job 4b Pass 2 when a primary signal references a meeting (per trigger-phrase list in `collectors/fathom.md`). Returns scoped meeting summary excerpt, relevant action items, attendees, recording URL. Never originates a row; never scanned eagerly. Failure is non-blocking — primary signals still flow. | `mcp__...fathom.search_meetings`, `get_summary`, `get_transcript` only |
 | **Notion** | Read Preferences. Write dated sub-pages, inline database, row detail pages. On 1st of month: move previous month into named toggle. ONLY the Notion parent page identified in `config.md`. **Read-only exception:** the Pod Matrix page identified by the runtime-injected `POD_MATRIX_URL` (Mode 1 routine prompt only — see `ROUTINE-ENTRYPOINTS.md`) is allowlisted for `notion-fetch` only; never written. Mode 2 and Monthly Archival do not receive `POD_MATRIX_URL` and do not read the Pod Matrix. | `mcp__...notion.*` |
@@ -159,7 +173,7 @@ Explicitly forbidden: Pipedrive, Apollo, Common Room, Hex, Calendar, Keka, Atlas
 3. **Plain language only for India delivery team outputs.** Handoff drafts written for team members (rendered in the row Outcome block for the PM to copy) and Orbit task bodies use 4th–5th grade general English with role-specific technical terms preserved. PMs, AMs, and leadership get normal professional English. See `writers/plain-language.md`.
 4. **Source citation on everything sourced from a document.** When the skill reads a PDF, image, PPT, or doc for context, it cites the filename in the output. See `writers/source-citation.md`.
 5. **Nothing client-facing or team-facing is auto-sent by default.** Emails are drafts, with the documented send exceptions in `executors/email.md`: connector-failure tier 1 email to PM, and Mode 2 Step 3a escalation email to backup. Slack is outbound-send only for two explicit-opt-in paths: team handoff send (PM Note = `send` + audience = `team`) and AM ping send (PM Note = `send` + audience = `am`) — see `executors/slack.md`. Without those explicit notes, team and AM handoffs are drafted into today's dated Notion page under the row's Outcome — the PM copies and sends from there. The PM self-summary at end of Mode 2 is written as a Notion callout block at the top of today's dated page (no auto-send to PM).
-6. **Availability is checked only on the no-history fallback path.** When at least one role-fit candidate has prior task history on the project, familiarity wins (no availability check). When no role-fit candidate has history (brand-new project, or all role-fit pod members are new to the project), the matcher calls Orbit `get_user_workload` for the role-fit candidates from the running PM's matrix and picks the lightest-loaded. If the PM's matrix has no role-fit member, the matcher checks the Floater matrix; if Floaters also lack the role, it surfaces cross-matrix candidates as `Uncertain:`. The PM still overrides via note. See `synthesis/matcher.md` Job 6 and `synthesis/pod-inference.md` Step 5. No Keka / leave data — that connector is forbidden.
+6. **`get_user_workload` has TWO uses, distinguished by `user_id` target.** (a) **PM-workload universe discovery (always-on, this collector):** `get_user_workload(PM_user_id, is_completed=incomplete, per_page=500)` is the primary universe-discovery call in `collectors/orbit.md`. It runs on every Mode 1 fire — the PM's open task list IS the morning universe. Per-project iteration (`list_projects` + `get_project_task_list × N`) is retired; the single workload call replaces it. (b) **Candidate-availability scoring (lazy):** `get_user_workload(candidate_user_id, ...)` is invoked by `synthesis/pod-inference.md` ONLY on the matcher Job 6 no-history fallback path. When at least one role-fit candidate has prior task history on the project, familiarity wins (no availability check). When no role-fit candidate has history (brand-new project, or all role-fit pod members are new to the project), the matcher calls `get_user_workload` for the role-fit candidates from the running PM's matrix and picks the lightest-loaded. If the PM's matrix has no role-fit member, the matcher checks the Floater matrix; if Floaters also lack the role, it surfaces cross-matrix candidates as `Uncertain:`. The PM still overrides via note. See `collectors/orbit.md` § MANDATORY tool call sequence, `synthesis/matcher.md` Job 6, and `synthesis/pod-inference.md` Step 5. No Keka / leave data — that connector is forbidden.
 7. **Mode 1 never asks the PM questions.** If unsure about an item, list it as its own row with an `Uncertain:` note in AI Notes. Never block waiting for input.
 8. **PM notes are interpreted as natural language.** See `synthesis/note-interpreter.md`. Short notes like `assign to Vijay`, `save as draft`, `mark as high priority` must resolve correctly.
 9. **Row-level approval is explicit per row.** No bulk-approve. No status sweep. Each row either gets flipped to `Approved`, gets a note, gets marked `Skip. No Action Needed`, or stays at `Recommended Action` (= no action).
@@ -172,7 +186,7 @@ Explicitly forbidden: Pipedrive, Apollo, Common Room, Hex, Calendar, Keka, Atlas
 16. **Every routine fire writes a run-log entry** to the Run Log database on the Notion parent. Brief reason traces (one line per decision: subject → action → reason). See `writers/run-log.md` and `schemas/run-log-database.md`.
 17. **All MCP calls retry with backoff before failing.** Every MCP tool call (any of the 3 primary collection MCPs — Orbit, Gmail, Notion — plus the Fathom enrichment MCP, plus the Slack outbound-send MCP) wraps in the retry policy defined in `connector-failure-notify.md`: 4 attempts total (1 + 3 retries), 2s/5s/15s incremental backoff, retry only on transient errors (timeout, 5xx, 429, connection reset). Permanent errors (4xx auth, 404, validation) skip retry. After exhaustion, the failure chain fires for primary MCPs; Fathom exhaustion is non-blocking (logged to Incidents page only, no PM callout). The run-log records all retry attempts.
 
-18. **The Morning Queue drives exactly two AI actions: `Create subtask` (universal across every project type, under a parent task currently assigned to the running PM, with explicit task title + 6-section brief) or `Flag` (PM-attention signal with no auto-execution).** Every other class of signal is either dropped (already handled by the PM overnight, surfaced in Orbit's own UI, hours-overrun alert, third-party automation) or downgraded to Flag. Priority-lane rows (AM handed parent to PM overnight, due today — see Mode 1 Step 3a) are always `Create subtask` with parent_task_id pinned to the AM-assigned parent. See `synthesis/matcher.md` Output gating + Job 11.
+18. **The Morning Queue drives exactly three AI actions: `Create subtask` (universal across every project type, under a parent task currently assigned to the running PM, with explicit task title + 6-section brief), `Flag` (PM-attention signal with no auto-execution), or `Create parent task` (Possible Orbit miss — Gmail-only critical-language signal with NO corroborating Orbit task; on PM approval, Mode 2 creates a parent Orbit task on the resolved project assigned to the PM so the PM can spawn sub-tasks under it later; requires unambiguous project resolution and downgrades to Flag when ambiguous).** Every other class of signal is either dropped (already handled by the PM overnight, surfaced in Orbit's own UI, hours-overrun alert, third-party automation) or downgraded to Flag. Priority-lane rows (AM handed parent to PM overnight, due today — see Mode 1 sub-step 1d) are always `Create subtask` with parent_task_id pinned to the AM-assigned parent. See `synthesis/matcher.md` Output gating + Job 5 § Possible Orbit miss detection + Job 11.
 
 19. **PM-action detection — never re-flag a signal the PM already handled overnight.** Before deciding Flag vs Drop, the matcher checks whether the PM took action on the signal between its arrival timestamp and Mode 1 fire (PM-sent email on the thread, PM-authored Orbit comment). If PM-action exists, the signal drops with `filter_reason: pm_already_handled`. This prevents the over-flagging that produced 13-row queues from PM-handled work. **Exception:** signals with `bypass_pm_action_filter == true` (set by the Orbit-first priority pass on AM-handed-to-PM tasks) are never dropped by this filter. Rationale: an AM-handed task is pending delegation even if the PM acknowledged it overnight. See `synthesis/matcher.md` PM-action detection.
 

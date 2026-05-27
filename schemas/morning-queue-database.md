@@ -27,9 +27,9 @@ The database has **10 columns total**. All 10 are visible in the default view, i
 | Visible in default view | YES (column 1 — leftmost) |
 | Set by | Mode 1 (the matcher), via `synthesis/matcher.md` |
 | Editable by PM | Yes, but rare — the matcher writes a good summary, PM usually doesn't change it |
-| Default value | A one-line verb-first action sentence per `synthesis/matcher.md` Job 4. Starts with one of TWO locked verbs: `Create subtask` or `Flag`. No other openers permitted. For `Create subtask` rows, the proposed sub-task title appears inside the Summary so the PM reads it without opening the row detail page. |
+| Default value | A one-line verb-first action sentence per `synthesis/matcher.md` Job 4. Starts with one of THREE locked verbs: `Create subtask`, `Flag`, or `Create parent task`. No other openers permitted. For `Create subtask` rows, the proposed sub-task title appears inside the Summary so the PM reads it without opening the row detail page. For `Create parent task` rows, the proposed parent title appears in the Summary and the assignee literal is `you`. |
 | Maximum length | Capped at 120 chars (the matcher enforces this — see Job 4 rules). |
-| Sample values | `Create subtask on ECP AI Visibility Audit #110464 — Run AI Visibility audit on approved competitor list. To Hitesh.` <br> `Create subtask on Solstice WP #106447 — Swap Contact Form brochure PDF. To Atul.` <br> `Flag 2010 Solutions — Ellen needs dev names for 27 May call. PM action.` <br> `Flag Conversant FTP — credentials still missing, blocking dev work today. PM action.` |
+| Sample values | `Create subtask on ECP AI Visibility Audit #110464 — Run AI Visibility audit on approved competitor list. To Hitesh.` <br> `Create subtask on Solstice WP #106447 — Swap Contact Form brochure PDF. To Atul.` <br> `Flag 2010 Solutions — Ellen needs dev names for 27 May call. PM action.` <br> `Flag Conversant FTP — credentials still missing, blocking dev work today. PM action.` <br> `Create parent task on Agency X — Investigate broken contact form ASAP. To you.` |
 
 ### Column 2 — `AI Notes`
 
@@ -41,7 +41,8 @@ The database has **10 columns total**. All 10 are visible in the default view, i
 | Editable by PM | Yes (PM can read and add their own notes; skill won't overwrite manual additions) |
 | Default value | Empty (only populated when there's something notable) |
 | Format | Plain text, multi-line OK. Notion truncates long text in table view; PM clicks into row to read full content. |
-| Common patterns | `Uncertain: I don't know if this email relates to Agency X's homepage or a new request.` <br> `<AM name> put this on your plate overnight, due today. Proposed delegate: Hitesh (history on project).` <br> `PM note changed assignee Vijay → Ravi. Honored.` <br> `New project — no task history. Pod inference based only on followers.` <br> `Gmail collector failed this morning — this row's source list is incomplete.` |
+| Common patterns | `Uncertain: I don't know if this email relates to Agency X's homepage or a new request.` <br> `<AM name> put this on your plate overnight, due today. Proposed delegate: Hitesh (history on project).` <br> `Possible Orbit miss: critical-language signal from jane@agencyx.com with no corroborating Orbit task. Creating parent task on Agency X on your approval.` <br> `PM note changed assignee Vijay → Ravi. Honored.` <br> `New project — no task history. Pod inference based only on followers.` <br> `Gmail collector failed this morning — this row's source list is incomplete.` |
+| Recognized prefix tags | `Uncertain:` — matcher could not confidently group, classify, or pick an assignee; PM resolves manually. <br> `Possible Orbit miss:` — Gmail-only critical-language signal with no corroborating Orbit task; row will create a parent Orbit task on PM approval (see `synthesis/matcher.md` Job 5 § Possible Orbit miss detection). |
 
 ### Column 3 — `Orbit Task Link`
 
@@ -76,9 +77,9 @@ The database has **10 columns total**. All 10 are visible in the default view, i
 | Visible in default view | YES (column 5) |
 | Set by | Mode 1 (the matcher) |
 | Editable by PM | Yes, but rare — PM usually drops a note in `PM Notes` instead of editing this column |
-| Default value | A short phrase describing one of the two locked actions (`Create subtask` or `Flag`) plus what Mode 2 will do. Per `synthesis/matcher.md` Job 5 the action set is closed to these two. |
+| Default value | A short phrase describing one of the three locked actions (`Create subtask`, `Flag`, or `Create parent task`) plus what Mode 2 will do. Per `synthesis/matcher.md` Job 5 the action set is closed to these three. |
 | Maximum length | Recommend under 100 chars for scannability |
-| Sample values | `Create subtask under #110464, assign to Hitesh (SEO/AI) + handoff draft` <br> `Create subtask under #106447, assign to Atul (WP) + handoff draft` <br> `Flag — PM owns next step (reply to Ellen). No Mode 2 action.` |
+| Sample values | `Create subtask under #110464, assign to Hitesh (SEO/AI) + handoff draft` <br> `Create subtask under #106447, assign to Atul (WP) + handoff draft` <br> `Flag — PM owns next step (reply to Ellen). No Mode 2 action.` <br> `Create parent task on Agency X assigned to you` |
 
 ### Column 6 — `Recommended Assignee`
 
@@ -223,7 +224,7 @@ Every row created by Mode 1 must have:
 
 - `Summary` populated — never empty
 - `AI Notes` — populated only if there's something notable; empty otherwise (priority-lane rows always populate this with the matcher's `<AM> put this on your plate overnight…` line)
-- `Orbit Task Link` — populated with the parent task URL for `Create subtask` rows; populated with the bound task URL for `Flag` rows that have one; set to `—` (or left empty) for `Flag` rows with no underlying Orbit task
+- `Orbit Task Link` — populated with the parent task URL for `Create subtask` rows; populated with the bound task URL for `Flag` rows that have one; set to `—` (or left empty) for `Flag` rows with no underlying Orbit task AND for `Create parent task` rows (no Orbit task exists at row-create time — the URL of the parent created by Mode 2 lands in `Outcome`, never in `Orbit Task Link`)
 - `Project` populated with `<name> (#<orbit_project_id>)` OR set to `Standalone`
 - `Recommended Action` populated (or a clear placeholder if there's truly no action — rare)
 - `Recommended Assignee` populated OR set to `—` for advisory items
@@ -321,6 +322,21 @@ When the schema needs to evolve (e.g., adding a column in a future version), use
 | Outcome | *(empty — Mode 2 does not execute Flag rows. PM marks Skip when resolved.)* |
 | PM Notes | *(empty)* |
 | Source Systems | `Gmail` |
+| Status | `Recommended Action` |
+
+## Sample row — Create parent task (Possible Orbit miss)
+
+| Column | Value |
+|---|---|
+| Summary | `Create parent task on Agency X — Investigate broken contact form ASAP. To you.` |
+| AI Notes | `Possible Orbit miss: critical-language signal from jane@agencyx.com with no corroborating Orbit task. Creating parent task on Agency X on your approval.` |
+| Orbit Task Link | `—` |
+| Project | `Agency X — Homepage Redesign (#9012)` |
+| Recommended Action | `Create parent task on Agency X assigned to you` |
+| Recommended Assignee | `You (PM) — Parent task assigned to you so you can spawn sub-tasks in later runs.` |
+| Outcome | *(empty until Mode 2 fires; after execution: `Created parent task #111002 on Agency X → Orbit [link]. Assigned to you. You can spawn sub-tasks under this in future runs.`)* |
+| PM Notes | *(empty — PM accepts the recommendation, or adds note like "high priority, due today")* |
+| Source Systems | `Gmail` (after Mode 2 execution: `Gmail, Orbit`) |
 | Status | `Recommended Action` |
 
 ---

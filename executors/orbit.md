@@ -35,6 +35,45 @@ Same as create_task, but add `parent_id` pointing to the parent task.
 
 Subtask titles should include the parent context. Example: `[Agency X Homepage] QA: verify mobile breakpoints`.
 
+### Create a parent task (Possible Orbit miss path)
+
+Triggered by rows whose `recommended_action` matches `Create parent task on <project> assigned to you` — i.e., `Create parent task` verb rows emitted by `synthesis/matcher.md` Job 5's Possible-Orbit-miss detection. These rows surface a Gmail-only critical-language signal that had no corroborating Orbit task; on PM approval, this executor creates the missing parent.
+
+Use `mcp__...orbit.create_task`.
+
+Required parameters:
+- `project_id` — `row.project_id` (resolved by the matcher; row will not have reached this path if project was ambiguous — see the matcher's project-uncertainty rule)
+- `title` — `row.task_title` (already plain-language per the matcher's title-generation rules)
+- `description` — `row.proposed_orbit_body`, the 6-section body. REFS section cites the originating Gmail thread by sender, subject, and thread URL — that citation is the entire basis for this parent's existence, so it must be present.
+- `assignee` — PM's Orbit user ID. Parent goes on the PM's plate so future sub-tasks can nest under it via the standard `Create subtask` path in later runs.
+- `parent_id` — **null / omitted**. This row creates a top-level parent, not a sub-task.
+- `internal_followers` — include the PM (always); add the AM if the row's `signal_context.actor_emails` matches an AM identity from Preferences.
+- `task_status_id` — 24 (To Do).
+- `start_date` — today's date in YYYY-MM-DD.
+
+Optional `due_date` derivation from the originating signal's urgency tokens:
+- Tokens `today`, `eod`, `end of day`, `before tomorrow`, `cannot wait` → set `due_date = today`.
+- Token `asap` → set `due_date = today` (treat as same-day).
+- Token `urgent`, `critical`, `blocker`, `blocking`, `escalation`, `client is waiting`, `please do` (without an explicit date token) → leave `due_date` unset; the PM will set it after triaging.
+- Multiple tokens → most aggressive wins (today over unset).
+
+The due-date path goes through `change_task_due_date` Path A (initial set, no reason required) when an urgency token forces today — the create_task call itself does not always carry a due date, so the executor calls `create_task` first, captures the returned `task_id`, then calls `change_task_due_date` with the today date.
+
+After creating, capture the returned `task_id` and Orbit task URL. Write to row Outcome:
+
+```
+Created parent task #<task_id> on <project_name> → Orbit [link]. Assigned to you. You can spawn sub-tasks under this in future runs.
+```
+
+If the matcher set a due date, append: ` Due <YYYY-MM-DD>.`
+
+**Source Systems multi-select on the row.** Add `Orbit` to the multi-select (the row's original Source Systems was `Gmail` only). After execution, the row reflects both: `Gmail` (the originating signal) AND `Orbit` (the executor-touched system).
+
+Edge cases:
+- **`row.project_id` null at execution time.** Defensive check; the matcher's project-uncertainty rule should prevent this path. If it happens, skip execution and write Outcome: `Skipped — project unresolved at execution time. Please create the parent task manually on the right project.`
+- **`create_task` MCP fails.** Standard retry-with-backoff per `connector-failure-notify.md` (4 attempts, 2s/5s/15s backoff). On exhaustion, write Outcome: `FAILED — parent task creation failed: <error>. Retry manually.`
+- **Project exists but PM is not a follower.** Add PM as follower in `internal_followers` per the parameter rule above. Orbit will accept this even if PM is new to the project.
+
 ### Assign a new (sub)task
 
 Pass `assignee` at create_subtask time.
@@ -151,6 +190,7 @@ If the task was derived from a document (PDF, image, PPT) that the skill read vi
 
 Build the `Outcome` string for the Morning Queue row. Format is concise and specific:
 - `Subtask #<id> created under parent #<parent_id> → Orbit [link]`
+- `Created parent task #<id> on <project_name> → Orbit [link]. Assigned to you. You can spawn sub-tasks under this in future runs.` (Create parent task path)
 - `Status updated → [new status] in Orbit [link]` (PM-note override only)
 - `Due date changed → [new date] in Orbit [link] (category: [category])` (PM-note override only)
 - `Severity bumped → [new severity] in Orbit [link]` (PM-note override only)

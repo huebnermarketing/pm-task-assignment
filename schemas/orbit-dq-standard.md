@@ -66,6 +66,28 @@ Every task the skill creates follows the section order and content rules below, 
 
 **Plain language** (4th–5th grade English) per `writers/plain-language.md`. Delivery team reads this. Role-specific technical terms preserved.
 
+## Source rule — body is composed from cross-linked context, not just the Orbit task
+
+The 6-section body is NOT a copy of the originating Orbit task description. The matcher composes it by reading:
+
+1. **The originating Orbit signal** — the parent task title, body, any comments captured in the signal (`get_task_details` + `list_task_comments` output).
+2. **Every cross-linked Gmail thread** attached as `signal.context_signals[]` via matcher Job 4b Pass 1. Read the FULL thread depth — every message, every reply, every attachment — not just the latest message. Long threads are common when an engagement spans days; the load-bearing context (prior decisions, named POCs, scope clarifications, deadline reasoning) often lives mid-thread.
+3. **Any Fathom enrichment** attached as `signal.enrichment.fathom` via matcher Job 4b Pass 2 (including the gmail-attachment fallback variant when Fathom MCP was unavailable).
+4. **Any external document referenced** by the above and fetched via `references/external-doc-access.md` (Drive / Docs / Sheets / SharePoint, read-only).
+
+Per-section mapping rules (full detail in `synthesis/matcher.md` Job 7 § Mandatory email-thread enrichment):
+
+- **DO** — if email phrasing defines the deliverable more precisely than the Orbit task title, use the email phrasing.
+- **WHY** — pull motivation from AM/client wording in the thread ("board demo Thursday", "client is impatient") rather than generic "client urgency".
+- **CONTEXT** — surface prior rounds, project phase, named POCs, dependencies. This is where long-thread context lands most often.
+- **DONE WHEN** — acceptance criteria called out in email ("must work on Safari iOS", "preview link to Jane", "include legal disclaimer") go here verbatim in plain language.
+- **SELF-QA** — role-specific items plus any explicit checks the email called out.
+- **REFS** — cite EVERY context source: Orbit parent task URL, every Gmail thread URL, Fathom recording URL (if any), any document URLs referenced in the thread.
+
+**This is unconditional.** Do NOT skip email enrichment because the Orbit task body looks complete — the formal task body rarely captures the full thread context. The bias is over-include, not under-include.
+
+**Conflict resolution.** When the email content conflicts with the Orbit task title or body, prefer the most recent authoritative source (latest AM message, latest client decision). When the resolution is unclear, surface the conflict in the row's AI Notes with `Uncertain:` prefix and let the PM disambiguate.
+
 ## Section-by-section guidance
 
 Section headers below use the `professional` style. The `emoji` equivalents are documented in the header-style table above.

@@ -151,6 +151,73 @@ Run this step only after the row has been written to Notion successfully. If the
 
 If label creation or label application fails (Gmail MCP error), log the failure on the row's `AI Notes` and do not retry; the row already exists in Notion so the signal is captured. Mark-read failures follow the same rule.
 
+## Transcript fallback for Fathom enrichment
+
+When the Fathom enrichment service (`collectors/fathom.md` `fetch_enrichment()`) returns `null` for a meeting reference — because Fathom MCP is down, auth expired, or no matching meeting was found — the matcher's Job 4b Pass 2 calls a fallback helper exposed by this collector:
+
+```
+find_transcript_in_email(reference, signal_context, gmail_signal_list) -> EnrichmentResult | null
+```
+
+The helper is conceptually part of this collector because it reuses the same Gmail signal data already pulled during the morning's primary collection pass — no additional Gmail MCP search calls are made (only attachment downloads on hit).
+
+### Inputs
+
+- **`reference`** — same shape as the `reference` input to `fetch_enrichment` in `collectors/fathom.md` (trigger_phrase, trigger_type, extracted_meeting_id, extracted_meeting_title, extracted_date_hint, extracted_attendee_name).
+- **`signal_context`** — same shape as `fetch_enrichment`'s `signal_context` (primary_signal_id, primary_signal_source, primary_signal_timestamp, project_id_candidates, actor_emails).
+- **`gmail_signal_list`** — the full list of Gmail signals already collected this morning (passed by reference; not re-fetched).
+
+### Logic
+
+1. **Candidate-message filter.** From `gmail_signal_list`, keep messages where ALL of:
+   - `timestamp ∈ [primary_signal_timestamp − 2 days, primary_signal_timestamp + 1 day]`
+   - Sender email matches one of: `*@fathom.video`, `noreply@fathom.video`, `support@fathom.video`, OR any address in `signal_context.actor_emails`
+   - Message has at least one attachment OR the message body contains a `fathom.video/<id>` URL
+2. **Attachment-shape filter.** For each candidate message, inspect attachment filenames. Accept any whose lowercased filename contains one of: `transcript`, `summary`, `recap`, `notes`, `meeting`, `call`. Accept extensions: `.txt`, `.md`, `.docx`, `.pdf`, `.vtt`, `.srt`.
+3. **Download + extract.** When a matching attachment is found, download via the same path the collector uses for normal attachment handling (existing `download_url` flow). Extract text content. For `.vtt`/`.srt`, strip timecode lines but otherwise treat the remaining text as the transcript verbatim — no smart parsing (first version keeps it simple).
+4. **Compose EnrichmentResult.** Return a partial `EnrichmentResult` (same shape as `collectors/fathom.md`'s output) with these field overrides:
+   ```
+   {
+     "meeting_id": null,
+     "meeting_title": <derived from attachment filename or, if missing, the email subject>,
+     "meeting_date": <message timestamp; if attachment text contains a clearly-marked meeting date header, prefer that>,
+     "meeting_duration_minutes": null,
+     "attendees": [
+       {
+         "name": <derived>,
+         "email": <from email recipients + sender>,
+         "is_external": <true if domain != @whitelabeliq.com>,
+         "is_pm": <true if matches PM canonical email or any alias>
+       }
+     ],
+     "pm_attended": <true if PM in recipients/sender>,
+     "summary_excerpt": <first 2-4 sentences of attachment text, scoped to reference per the same scoping rule as collectors/fathom.md>,
+     "relevant_action_items": [],
+     "recording_url": null,
+     "citation": {
+       "type": "gmail_attachment",
+       "label": "Email attachment: <filename> from <sender>, <date>",
+       "url": <gmail thread URL>
+     },
+     "match_confidence": "low" | "medium",
+     "enrichment_source": "gmail_attachment_fallback"
+   }
+   ```
+   `match_confidence` is `"medium"` when the attendee/email-domain overlap with `signal_context.actor_emails` is strong; `"low"` otherwise. The extra `enrichment_source` field lets the writer differentiate this from a true Fathom hit (which has `enrichment_source` absent OR `"fathom"`).
+5. **Null return.** If no candidate message has a matching attachment, return `null`. The matcher then proceeds without enrichment for this signal.
+
+### What this helper does NOT do
+
+- Does NOT make new Gmail MCP search calls. It scans the already-collected `gmail_signal_list` only.
+- Does NOT search Google Drive for transcripts. That would expand the external-doc-access scope from "fetch specific file" to "search files" — deliberately deferred per the user's "email attachments only" decision.
+- Does NOT parse `.vtt`/`.srt` semantically beyond stripping timecode lines. First version takes the file's plaintext content verbatim.
+- Does NOT extract structured action items from the transcript. `relevant_action_items` is returned empty; the `summary_excerpt` is the only narrative content.
+- Does NOT cache results across signals — each call is independent. If two primary signals reference the same meeting, the helper runs twice (acceptable since attachment download is bounded by lookback-window signal count).
+
+### Tool calls used by the helper
+
+The helper relies on the existing Gmail MCP tools listed in the next section (`gmail_read_message` / `gmail_read_thread` for attachment access, no new calls). No new MCP tool is added to the allowlist.
+
 ## Tool calls (only Gmail MCP)
 
 - `mcp__...gmail.gmail_get_profile` — confirm the PM's WLIQ email at preflight

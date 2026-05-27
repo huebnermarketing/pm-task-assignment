@@ -6,16 +6,24 @@
 
 ## Purpose
 
-Pull overnight signals from Orbit that are relevant to the PM's projects. Return a structured list of signals ready for `synthesis/matcher.md`.
+Pull overnight signals from Orbit that are relevant to **the PM's own todos** (every open task assigned to the PM). Return a structured list of signals ready for `synthesis/matcher.md`.
 
 This collector runs in **two passes** during Mode 1:
 
-- **Pass A — Priority pass** (Mode 1 Step 3a, sequential, blocking). Narrow scope: parent tasks an AM created or reassigned to the running PM overnight, `due_date = today`. Output goes into a separate `priority_signals` list. See `## Priority Pass (Mode 1 Step 3a)` below.
-- **Pass B — Normal pass** (Mode 1 Step 3b, parallel with Gmail + Fathom). Broad scope: activity log + overdue + new tasks + status changes + new comments + attachments since `last_run_timestamp`. Output goes into the normal `orbit_signals` list. Behaves as documented in the original sections of this file.
+- **Pass A — Priority pass** (Mode 1 sub-step 1d, sequential, blocking). Narrow scope: parent tasks an AM created or reassigned to the running PM overnight, `due_date = today`. Output goes into a separate `priority_signals` list. See `## Priority Pass (Mode 1 sub-step 1d)` below.
+- **Pass B — Normal pass** (Mode 1 sub-step 1e, parallel with the Gmail collector at 2a). Broad scope: every open task on the PM's plate (workload snapshot) + activity since `last_run_timestamp` (status changes, new comments, due-date moves, assignment changes). Output goes into the normal `orbit_signals` list. Behaves as documented in the sections below.
 
 Mode 2 invokes neither pass — execution reads the morning queue from Notion, not from a fresh Orbit pull.
 
-## Priority Pass (Mode 1 Step 3a)
+## Universe model — user-scoped, NOT project-scoped
+
+Orbit has a direct user-scoped workload API: `get_user_workload(user_id, is_completed, per_page)` returns the **entire list of open tasks assigned to that user** in a single call, plus summary counts (overdue, due today, by project) and full per-task details. The PM's morning universe IS their workload — there is no need to enumerate "projects PM owns / follows / was active in for the last 6 months" and then iterate `get_project_task_list` per project. That iteration produced N API calls of mostly-irrelevant tasks (tasks PM follows but isn't assigned to). The single `get_user_workload(PM)` call replaces it.
+
+**The universe of interest = `get_user_workload(PM_user_id, is_completed=incomplete, per_page=500)`.** Every primary collection signal flows from this set, with `get_activity_log` providing the change history for tasks in the set since `last_run_timestamp`.
+
+Tasks the PM follows but is NOT assigned to are intentionally out of scope here — if a follower-only task needs PM input, that ask reliably surfaces through Gmail (the AM emails the PM) and is captured by `collectors/gmail.md`. The morning queue is about the PM's own todos plus the items the PM hasn't yet acknowledged; Gmail is the safety net for everything outside the PM's direct task list (per Mode 1 Step 2 § Role of Gmail and matcher Job 5 § Possible Orbit miss detection).
+
+## Priority Pass (Mode 1 sub-step 1d)
 
 This pass runs FIRST in Mode 1, before any other collector. It produces the `priority_signals` list that lands in the top-of-queue priority lane. Triggered when Mode 1 invokes the collector with `priority_pass = true`.
 
@@ -46,14 +54,14 @@ Edge cases:
 
 ### Tool sequence
 
-For the priority pass only (the normal-pass mandatory sequence still applies separately):
+For the priority pass only (the normal-pass mandatory sequence still applies separately and reuses the same workload + activity-log responses):
 
 1. **`list_users`** — already called once per run (cached by `references/pod-matrix.md`). Reuse the cache.
-2. **`get_project_task_list`** with `due_date_filter: "today"` AND `assignee_id == PM_user_id` — run once per project in the PM's universe (owner + follower + active-in-last-6-months, same scope as the normal pass). Returns the small set of today's-due tasks currently on the PM's plate.
-3. **`get_activity_log`** — already called in the normal pass with `from_date = last_run_timestamp`. The priority pass reuses the same response. For each candidate task from step 2, cross-reference the activity log to confirm: (a) `created_by_id ∈ AM_user_ids` AND `created_at >= last_run_timestamp`, OR (b) an `assignee_change` entry exists for this task with `new_assignee_id == PM`, `actor_id ∈ AM`, and `timestamp >= last_run_timestamp`.
-4. **`get_task_details`** — called per surviving candidate to enrich the priority signal with the full parent task body (so the matcher can render the proposed sub-task brief without an extra fetch later).
+2. **`get_user_workload`** — already called in the normal pass with `user_id == PM_user_id, is_completed=incomplete, per_page=500`. The priority pass reuses that response. Filter the returned task list to tasks where `due_date == today (IST)`. This is the candidate set — typically a handful of tasks.
+3. **`get_activity_log`** — already called in the normal pass with `from_date = last_run_timestamp` scoped to the PM's task universe. The priority pass reuses the same response. For each candidate task from step 2, cross-reference the activity log to confirm: (a) `created_by_id ∈ AM_user_ids` AND `created_at >= last_run_timestamp`, OR (b) an `assignee_change` entry exists for this task with `new_assignee_id == PM`, `actor_id ∈ AM`, and `timestamp >= last_run_timestamp`.
+4. **`get_task_details`** — called per surviving candidate to enrich the priority signal with the full parent task body (so the matcher can render the proposed sub-task brief without an extra fetch later). Often `get_user_workload` already returns enough detail to skip this — only call when the body or description is missing or truncated.
 
-Tool budget for the priority pass: ≤ 2 extra MCP calls per project (`get_project_task_list` + `get_task_details` on the typically-tiny survivor set). The cached `list_users` and activity log are free. On a typical morning where most projects have zero today's-due tasks on PM's plate, only a handful of `get_task_details` calls fire.
+Tool budget for the priority pass: 0 new MCP calls in most mornings (the `get_user_workload`, `get_activity_log`, and `list_users` calls are shared with the normal pass and cached). `get_task_details` fires only on the typically-tiny survivor set when extra body content is needed beyond what workload returned.
 
 ### Output shape — per priority signal
 
@@ -96,7 +104,7 @@ Two fields are load-bearing for downstream matcher logic:
 ### What the priority pass does NOT do
 
 - Does not pick the delegated assignee. PM did not choose one (the parent task sits with the PM, not a delegate). Assignee suggestion runs in `synthesis/matcher.md` Job 6 via the existing 4-branch tree — same logic as any other Create-subtask row.
-- Does not call `get_user_workload`. That's reserved for Job 6's no-history fallback path.
+- Does not make a separate `get_user_workload` call — it reuses the one fired by the normal pass (step 2 of the mandatory sequence). The priority pass is a filter + cross-reference over that shared response, not an independent fetch.
 - Does not run in Mode 2. Mode 2 reads the morning queue from Notion, not Orbit.
 - Does not double-emit signals into the normal pass. A task surfaced as a priority signal is excluded from the normal pass's `new_task` signal type (deduplicate by `task_id`).
 
@@ -104,50 +112,55 @@ Two fields are load-bearing for downstream matcher logic:
 
 ## MANDATORY tool call sequence — no shortcuts (Normal pass)
 
-This block overrides any inferred "fast path" the runtime might take. Mode 1's normal pass MUST invoke the following Orbit MCP tools in this exact order on every run. Skipping any of them is a Mode 1 failure and the assertion in `modes/mode-1-morning-collection.md` will abort the run. The Priority Pass above runs FIRST (sequentially) and reuses the activity-log and `list_users` results emitted by this normal-pass sequence; the two passes share tool calls, they do not duplicate them.
+This block overrides any inferred "fast path" the runtime might take. Mode 1's normal pass MUST invoke the following Orbit MCP tools in this exact order on every run. Skipping any of them is a Mode 1 failure and the assertion in `modes/mode-1-morning-collection.md` Step 1f will abort the run. The Priority Pass above runs FIRST (sequentially) and reuses the workload, activity-log, and `list_users` results emitted by this normal-pass sequence; the two passes share tool calls, they do not duplicate them.
 
-1. `get_user_details` — PM identity + assigned projects list.
-2. `list_projects` filtered by `project_owner_id` — owned-project enrichment.
-3. **`get_activity_log` with `from_date = last_run_timestamp`** — the **non-skippable** comment + change-history pull. Every comment, status flip, new task, new assignment landing inside the lookback window arrives ONLY via this call. `get_user_workload` does NOT return comments and is not a substitute. Run this call on every project in the universe; do not pre-filter.
-4. `list_task_comments` — fallback for any task flagged by activity log that needs comment-body detail (activity log entries may include comment IDs but not full text).
-5. `get_project_task_list` — for overdue / unassigned / new-task filters per the steps below.
-6. `get_task_details` — for context on flagged tasks.
-7. `get_asset_attachment_summary_with_download_url` — for new attachments.
-8. `list_clients` / `list_sub_clients` / `list_users` — relationship-map enrichment.
+1. **`get_user_details`** — PM identity confirmation (id, name, email).
+2. **`get_user_workload` with `user_id == PM_user_id, is_completed=incomplete, per_page=500`** — the **non-skippable** universe-discovery call. Returns the full list of every open task assigned to the PM, with per-task details (project, due_date, status, severity, parent_id, description if present) and summary counts (overdue / due-today / by-project). This is the canonical PM-todo universe for the run; every downstream signal flows from it. Replaces the prior `list_projects` → `get_project_task_list × N` per-project iteration entirely.
+3. **`get_activity_log` with `from_date = last_run_timestamp`** — the **non-skippable** change-history pull. Every comment, status flip, due-date move, new assignment, AM action landing inside the lookback window arrives ONLY via this call. Workload returns the static snapshot; activity_log returns the deltas since last run. Scope: pass the task IDs from step 2 (workload) if the MCP supports task-id filtering; otherwise call user-scoped (events involving PM as actor or target) and cross-reference against the workload task IDs locally. Do NOT iterate per project — that was the old model.
+4. **`list_task_comments`** — fallback for any task flagged by activity log that needs comment-body detail (activity log entries may include comment IDs but not full text).
+5. **`get_task_details`** — for any workload task whose description / body is missing or truncated in the workload response. Skip when workload already returned sufficient detail (typical case).
+6. **`get_asset_attachment_summary_with_download_url`** — for any new attachments flagged by activity log on PM-workload tasks.
+7. **`list_clients` / `list_sub_clients` / `list_users`** — relationship-map enrichment for client / sub-client / actor identification on the workload's per-task project info.
 
-`get_user_workload` is **lazy-only** — invoked by `synthesis/pod-inference.md` on the no-history fallback path, never as a substitute for steps 3–6. A Mode 1 run whose Orbit tool trace is `[get_user_workload × N]` and nothing else is a SPEC VIOLATION.
+**`list_projects` and `get_project_task_list` are no longer in the mandatory sequence.** The PM's task universe comes from `get_user_workload(PM)`, not from project enumeration. These tools remain available for narrow secondary use cases (e.g., the PM's owned-project list, if needed for non-collection purposes), but are NOT called during the normal collection pass.
 
-If `get_activity_log` returns an MCP error, apply the retry policy from `connector-failure-notify.md` (4 attempts, 2s/5s/15s backoff). After 4 failures, log `orbit_activity_log_unavailable` in the Run Log and continue — but the Mode 1 assertion will surface the gap to the PM in the page summary.
+`get_user_workload` now has TWO uses in this skill, with different `user_id` targets:
 
-## Scope
+- **PM-workload (this collector, mandatory)** — `get_user_workload(PM_user_id, ...)` is the morning-collection universe-discovery call. Always called in Mode 1 Step 1d/1e.
+- **Candidate-availability (pod-inference, lazy)** — `get_user_workload(candidate_user_id, ...)` is called by `synthesis/pod-inference.md` ONLY on the matcher Job 6 no-history fallback path, to score availability of a small candidate subset. Per SKILL.md non-negotiable rule #6.
 
-Signals scoped to the PM's projects. "PM's projects" means:
+The Mode 1 Step 1f assertion checks BOTH that `get_user_workload(PM)` was called (step 2 above) AND that `get_activity_log` was called (step 3) — a tool trace missing either is a hard abort. A trace that shows only `get_user_workload(PM)` and no `get_activity_log` is also a SPEC VIOLATION — change detection requires both calls.
 
-1. Projects where the PM is the owner (from `list_projects` with `project_owner_id` filter — but note this is a small set)
-2. Projects where the PM is a follower (from `get_user_details` with `include_assigned_projects: true` — the big set)
-3. Projects active in the last 6 months where the PM has been a task assignee or commenter
+If `get_user_workload(PM)` returns an MCP error, apply the retry policy from `connector-failure-notify.md` (4 attempts, 2s/5s/15s backoff). After 4 failures, log `orbit_user_workload_unavailable` in the Run Log and abort the Orbit collector — no universe means no Orbit signals this run. If `get_activity_log` returns an MCP error, apply the same retry policy. After 4 failures, log `orbit_activity_log_unavailable` and continue with workload-only data — the PM will see "no change detection this morning, only static workload" in the page summary, and the Mode 1 Step 1f assertion will surface the gap.
 
-Combine all three and deduplicate by project ID. This is the "universe" for the morning run.
+## Scope — the PM's open task list
 
-## What to pull per project
+The "universe" for the morning run is the set of open tasks returned by `get_user_workload(PM_user_id, is_completed=incomplete, per_page=500)`. Each task in the response carries its project, due_date, status, severity, assignee (= PM), parent_id, and (typically) description.
 
-For each project in the universe:
+What is NOT in scope:
 
-1. **Activity log since the PM's last run** — `get_activity_log` with `from_date = last_run_timestamp`. This surfaces every field change, status transition, new comment, new task, new assignment.
-2. **Overdue tasks where the PM is owner or follower** — `get_project_task_list` with `due_date_filter: "overdue"`. Flag if any.
-3. **New tasks created since last run** — filter `get_project_task_list` results by `created_at >= last_run_timestamp`.
-4. **Unassigned tasks in the PM's projects** — `get_project_task_list` with `assignee_id: 0`. These are orphans needing assignment.
-5. **Task status changes that matter** — any task where status moved into `Waiting for Feedback`, `Client Review`, `Blocked`, or `Done` since last run. PM needs to know.
-6. **New comments on tasks** — from activity log. Especially ones mentioning the PM (@ in comment content).
-7. **New attachments on tasks or projects** — flag for PM's attention. Include filename and download URL from `get_asset_attachment_summary_with_download_url` if user may need to review.
+- **Tasks where the PM is a follower but not the assignee.** These intentionally drop out of the Orbit universe. If a follower-only task needs PM input, the ask reliably surfaces through Gmail — captured by `collectors/gmail.md` and routed via matcher Job 5 (possibly as Possible-Orbit-miss if no Orbit corroboration).
+- **Unassigned project orphans.** Previously detected via `get_project_task_list(assignee_id: 0)` per project. Out of scope under the user-centric model — if an unassigned task genuinely needs the PM's attention, an AM will email about it.
+- **Cold tasks the PM is no longer involved with.** Workload naturally excludes them (only `is_completed=incomplete` tasks return).
+
+## What to pull from the workload
+
+For each task in the workload response:
+
+1. **Static snapshot** — task_id, title, project info, due_date, status, severity, parent_id, description. This is the row's foundational data and the matcher's relationship map seed.
+2. **Activity since `last_run_timestamp`** — from the `get_activity_log` call. Every field change, status transition, new comment, new assignment, due-date move on this task ID lands as an `activity_log_entry` signal.
+3. **New comments** — from activity log entries with `type: comment` on this task ID. Especially ones mentioning the PM (@ in comment content).
+4. **Status changes that matter** — any task where status moved into `Waiting for Feedback`, `Client Review`, `Blocked`, or `Done` since last run.
+5. **Overdue flag** — tasks where `due_date < today (IST)` AND status is not `Done` get an `overdue_task` signal type.
+6. **Today's-due flag** — tasks where `due_date == today (IST)` AND status is not `Done` AND not already in `priority_signals[]` (the priority pass takes precedence). Used by sort rule heuristics, not as a standalone signal.
+7. **New attachments** — flagged by activity log on the task; pull filename + download URL via `get_asset_attachment_summary_with_download_url` if PM may need to review.
 
 ## What to skip
 
-- Field changes the PM made themselves (self-noise).
+- Field changes the PM made themselves (self-noise — actor_id == PM_user_id on field changes).
 - Automated bot comments (e.g., "system updated due date").
-- Projects closed more than 30 days ago (historical).
-- Tasks in the "Archive" project status.
-- Projects where the PM is a follower but hasn't been a task assignee or commenter in the last 6 months (cold projects).
+- Tasks already surfaced in `priority_signals[]` (deduplicate by task_id between priority and normal passes).
+- Tasks where status is `Archive` (already complete from PM's perspective).
 
 ## Output shape — per signal
 
@@ -156,7 +169,7 @@ Each signal is a structured record:
 ```
 {
   "source": "orbit",
-  "signal_type": "activity_log_entry" | "overdue_task" | "new_task" | "status_change" | "new_comment" | "new_attachment" | "unassigned_task",
+  "signal_type": "activity_log_entry" | "overdue_task" | "new_task" | "status_change" | "new_comment" | "new_attachment",
   "project_id": <int>,
   "project_title": <string>,
   "project_url": <string>,
@@ -227,35 +240,45 @@ Structure:
 }
 ```
 
-The `tasks` array is populated from the `get_project_task_list` call the collector already makes per project (one call per project in the universe) — no new MCP call. It serves three downstream needs:
+The relationship map is now **derived from `get_user_workload(PM)` response**, not from per-project iteration. Each task in the workload carries its project info (project_id, title, client, sub-client, AM, owner, followers, project_type). The collector deduplicates the workload's per-task project info into project-level entries for this map.
 
-1. `synthesis/matcher.md` Job 5 — finding the PM-owned parent task to nest a sub-task under (filter `is_pm_owned == true`).
+The `tasks` array is populated from the workload response directly — every open task assigned to the PM appears here with `is_pm_owned = true` (by definition, since workload only returns PM-assigned tasks). For projects where workload returned multiple tasks, all of them appear in the array; the project entry consolidates them.
+
+It serves three downstream needs:
+
+1. `synthesis/matcher.md` Job 5 — finding the PM-owned parent task to nest a sub-task under (filter `is_pm_owned == true`, which is true for every task in this map by definition).
 2. `synthesis/matcher.md` — composing the row's `orbit_task_link` column by looking up the parent task's `url` by `parent_task_id` when the signal itself doesn't carry the parent URL.
-3. `synthesis/pod-inference.md` — computing `has_history_on_project` for candidate assignees via task-count rollups.
+3. `synthesis/pod-inference.md` — computing `has_history_on_project` for candidate assignees. Note: under the user-scoped universe, the relationship map's project list is bounded by projects where the PM has at least one assigned open task. Projects where the PM is a follower-only contribute to history scoring only through Gmail-routed signals (no Orbit follower-only signal reaches this map).
 
-This map is used by `synthesis/matcher.md` to take a signal from Gmail (e.g., "email from jane@agencyx.com") and figure out it's about project 8426 because Agency X is the client for that project and Jane is a client contact.
+This map is used by `synthesis/matcher.md` to take a signal from Gmail (e.g., "email from jane@agencyx.com") and figure out it's about project 8426 because Agency X is the client for that project and Jane is a client contact. The candidate project must still appear in the map (i.e., PM has at least one open task there) for the routing to work — Gmail-only signals about projects with NO PM-assigned task become Possible-Orbit-miss candidates per matcher Job 5 § Possible Orbit miss detection.
 
-It's also used by `synthesis/pod-inference.md` to compute candidate assignees per project.
+It's also used by `synthesis/pod-inference.md` to compute candidate assignees per project that appears in the map.
 
 ## Tool calls
 
 Use the following Orbit MCP tools (the `mcp__...orbit.` prefix matches whichever Orbit MCP namespace the user has installed):
 
-- `mcp__...orbit.get_user_details` — for PM identity + assigned projects list
-- `mcp__...orbit.list_projects` — filtered by `project_owner_id`
-- `mcp__...orbit.get_project_details` — for per-project metadata
-- `mcp__...orbit.get_activity_log` — for changes since last run
-- `mcp__...orbit.get_project_task_list` — for overdue / unassigned / new tasks
-- `mcp__...orbit.get_task_details` — for full context on flagged tasks
-- `mcp__...orbit.list_task_comments` — for recent comments
-- `mcp__...orbit.get_asset_attachment_summary_with_download_url` — for attachment summaries (but note: unreliable for non-txt — default to download-and-read per `writers/source-citation.md`)
-- `mcp__...orbit.list_clients`, `mcp__...orbit.list_sub_clients` — for client/sub-client enrichment in the relationship map
-- `mcp__...orbit.list_users` — for matrix-name → user_id resolution. Called once per Mode 1 run by `references/pod-matrix.md`; the user list is cached for the duration of the run.
-- `mcp__...orbit.get_user_workload` — invoked **on-demand** by `synthesis/pod-inference.md` (NOT in the bulk per-run pull). Used only when `synthesis/matcher.md` Job 6 hits the no-history fallback path and needs an availability score for a small subset of role-fit candidates. Subject to the same retry policy.
+- `mcp__...orbit.get_user_details` — for PM identity confirmation (id, name, email)
+- **`mcp__...orbit.get_user_workload`** — **the primary universe-discovery call.** Two distinct uses, distinguished by `user_id`:
+  - **PM-workload (THIS collector, mandatory):** `get_user_workload(PM_user_id, is_completed=incomplete, per_page=500)`. Called once per Mode 1 run in step 2 of the mandatory sequence. Returns every open task assigned to the PM with full details + summary counts.
+  - **Candidate-availability (`synthesis/pod-inference.md`, lazy):** `get_user_workload(candidate_user_id, ...)`. Invoked ONLY on the matcher Job 6 no-history fallback path to score availability of a small candidate subset. Per SKILL.md non-negotiable rule #6.
+- `mcp__...orbit.get_activity_log` — for changes since last run. Pass workload task IDs if MCP supports task-id filtering; otherwise call user-scoped and cross-reference locally.
+- `mcp__...orbit.get_task_details` — for full body context on any workload task whose description is missing or truncated. Skip when workload already returned sufficient detail.
+- `mcp__...orbit.list_task_comments` — fallback for activity-log entries that reference a comment by id without the body text.
+- `mcp__...orbit.get_asset_attachment_summary_with_download_url` — for new attachments flagged on workload tasks (note: unreliable for non-txt — default to download-and-read per `writers/source-citation.md`).
+- `mcp__...orbit.list_clients`, `mcp__...orbit.list_sub_clients` — for client/sub-client enrichment in the relationship map.
+- `mcp__...orbit.list_users` — for matrix-name → user_id resolution + AM identity resolution in the priority pass. Called once per Mode 1 run by `references/pod-matrix.md`; the user list is cached for the duration of the run.
+
+**Removed from the mandatory sequence (no longer called during normal collection):**
+- `mcp__...orbit.list_projects` — was used to enumerate the PM's project universe; replaced by user-centric workload discovery. Remains available if a downstream component genuinely needs the PM's owned-project list, but the collector itself does not call it.
+- `mcp__...orbit.get_project_task_list` — was used to iterate per-project task lists; replaced entirely by `get_user_workload(PM)`. Not called during normal collection.
+- `mcp__...orbit.get_project_details` — was used for per-project metadata; project info now comes inline with each task in the workload response.
 
 ## Performance
 
-Projects universe is capped at \~400 (the typical WLIQ follower count). Most days only 10–50 of those have activity since the last run. Filter aggressively using the last-run timestamp before paginating through task lists.
+Single primary API call (`get_user_workload(PM)`) returns the entire universe — typically 30–80 open tasks for a working PM, capped at `per_page=500`. Add one `get_activity_log` call for change detection, plus a small number of `get_task_details` / `list_task_comments` / `get_asset_attachment_summary_with_download_url` calls for the subset of tasks with new activity. Compared to the prior project-iteration model (which fired N task-list calls for N=30-50 projects in the universe), the new model is roughly an order of magnitude faster for the collection step.
+
+Wall-clock target for Orbit collection alone: under 30 seconds on a typical morning. The full Mode 1 wall-clock target (10–15 minutes) is dominated by Notion writes and synthesis, not Orbit calls.
 
 ## Error handling
 
@@ -271,4 +294,7 @@ Projects universe is capped at \~400 (the typical WLIQ follower count). Most day
 - Does not synthesize or group signals. That's the matcher's job.
 - Does not dedup against other sources. Each source collector is independent.
 - Does not filter by urgency or importance. Every relevant signal is returned.
-- Does not collect workload proactively. `get_user_workload` is called lazily by pod-inference on a small candidate subset only when the matcher requests an availability check (per `SKILL.md` non-negotiable rule #6).
+- Does not iterate per project. The universe-discovery model is user-centric (`get_user_workload(PM)`) — `list_projects` and `get_project_task_list` are NOT called during normal collection. Per-project iteration was the old model and produced N API calls of mostly-irrelevant tasks; the single workload call replaces it.
+- Does not detect follower-only tasks (tasks the PM follows but is not assigned to). If a follower-only task needs PM input, the ask reliably surfaces through Gmail and is captured by `collectors/gmail.md`; matcher Job 5 routes it via the standard or Possible-Orbit-miss paths.
+- Does not detect unassigned project orphans. Same rationale — if an unassigned task genuinely needs the PM, an AM will email about it.
+- Does not collect candidate-workload proactively. `get_user_workload(candidate_user_id)` (different `user_id` than the PM-workload call) is invoked lazily by `synthesis/pod-inference.md` on the matcher Job 6 no-history fallback path only, per `SKILL.md` non-negotiable rule #6. The PM-workload call IS made proactively every Mode 1 run — that is its intended use.

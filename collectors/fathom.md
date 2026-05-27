@@ -129,7 +129,7 @@ Tools NOT used by this enrichment-only model:
 
 | Failure | Behavior |
 |---|---|
-| Fathom MCP unavailable / auth expired | Return `null`. Log to Incidents page once per Mode 1 run: "Fathom enrichment unavailable — N primary signals were not enriched." Do NOT trigger the connector-failure fallback chain (Fathom is non-blocking — see `connector-failure-notify.md`). |
+| Fathom MCP unavailable / auth expired | Return `null`. The matcher's Job 4b Pass 2 will attempt a gmail-attachment fallback (`collectors/gmail.md` § Transcript fallback) before treating the null as terminal. The Incidents log entry is written once per Mode 1 run **only if both Fathom AND the gmail-attachment fallback failed for at least one signal**, with format: `Fathom enrichment unavailable AND no email-attachment fallback found for N primary signals.` Do NOT trigger the connector-failure fallback chain (Fathom is non-blocking — see `connector-failure-notify.md`). |
 | Reference resolves to zero meetings | Return `null`. Matcher proceeds without enrichment for this signal. |
 | Reference resolves to a meeting but `get_summary` fails | Return `EnrichmentResult` with `summary_excerpt = null` and `match_confidence: "low"`. Still include recording_url so the PM can watch. |
 | Recording URL is missing from the meeting object | Return the result with `recording_url = null`. Matcher writer should flag in AI Notes: "Fathom recording URL unavailable." |

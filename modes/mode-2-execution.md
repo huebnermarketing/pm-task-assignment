@@ -115,16 +115,19 @@ For each row, decide what to do:
 
 For each row that needs action:
 
-1. Identify row type from the Summary verb: `Create subtask on …` or `Flag …`.
+1. Identify row type from the Summary verb: `Create subtask on …`, `Flag …`, or `Create parent task on …`.
 2. **Flag rows do not execute.** Mode 2 skips Flag rows entirely. The row stays at its current Status (PM marks `Skip. No Action Needed` manually once they resolve the flagged item externally). Log: `Flag row — no Mode 2 action.` Move on.
 3. **Create subtask rows** — load the row's detail page content (Action Block callout at top, proposed Orbit task body, proposed Handoff, sources).
-4. If there's a PM note, feed it to `synthesis/note-interpreter.md` to resolve the intent and override parts of the recommendation. Notes may change the assignee, the parent task, severity, or due date — but cannot change the row type.
-5. Route to the appropriate executors:
-   - **Orbit** — `executors/orbit.md` Create-subtask path: `parent_id = parent_task_id`, `assignee_id = recommended_assignee`, `description = proposed_orbit_body`. PM-note overrides (severity, due date, follower add) are applied as additional `update_task` or `change_task_due_date` calls AFTER the subtask is created. Priority-lane rows pass `parent_id = signal.parent_task_id` from the matcher (the AM-assigned parent) — the sub-task nests under that parent.
-   - **Notion (default handoff path)** — every Create-subtask row produces a Handoff draft block (per `writers/notion.md` Flow — updating rows after Mode 2) appended under the row's Outcome. PM copies + sends it themselves. This is the default and applies to every team handoff and every AM ping unless the PM explicitly opts into the Slack send path.
-   - **Slack (outbound-send only, narrow exception)** — `executors/slack.md` sends the handoff/ping via Slack only when the PM left an explicit `send` note on the row AND the audience matches a documented send path: (a) `audience = team` → team-handoff send to the delegate's Slack handle (resolved via the Slack handles reference block on the dated page — see `writers/notion.md`), (b) `audience = am` → AM-ping send to the AM's Slack handle (resolved via Preferences `AM Slack handle` field, also rendered on the dated page reference block). Without an explicit `send` note, the handoff stays as a Notion draft for the PM to copy.
-6. Before calling any executor, pass every string the assignee (delivery team) will read through `writers/plain-language.md` to enforce 4th–5th grade English.
-7. Pass every source reference through `writers/source-citation.md` to ensure proper citation format.
+4. **Create parent task rows** — load the row's detail page content (proposed Orbit task body for the parent, sources). These rows do NOT have a proposed Handoff (no delegate; parent is PM-assigned) and do NOT participate in the Pod Daily Task or AM Daily Ping blocks (Step 9). Route to `executors/orbit.md` § Create a parent task. PM-note overrides apply the same way (severity, due-date, follower add) via post-create `update_task` / `change_task_due_date` calls.
+5. If there's a PM note, feed it to `synthesis/note-interpreter.md` to resolve the intent and override parts of the recommendation. Notes may change the assignee, the parent task, severity, or due date — but cannot change the row type (a `Create parent task` row cannot be re-cast as `Create subtask` via note; if the PM wants that, they delete the row and let it re-emerge with corrected matcher input next morning).
+6. Route to the appropriate executors:
+   - **Orbit** — `executors/orbit.md`. Dispatch by verb:
+     - `Create subtask on …` → Create-subtask path: `parent_id = parent_task_id`, `assignee_id = recommended_assignee`, `description = proposed_orbit_body`. PM-note overrides (severity, due date, follower add) are applied as additional `update_task` or `change_task_due_date` calls AFTER the subtask is created. Priority-lane rows pass `parent_id = signal.parent_task_id` from the matcher (the AM-assigned parent) — the sub-task nests under that parent.
+     - `Create parent task on …` → Create-parent-task path: `project_id = row.project_id`, `assignee_id = PM_user_id`, `parent_id = null`, `description = proposed_orbit_body`. Optional `due_date` derived from urgency tokens per `executors/orbit.md` § Create a parent task. After creation, add `Orbit` to the row's Source Systems multi-select (the row was Gmail-origin).
+   - **Notion (default handoff path)** — every Create-subtask row produces a Handoff draft block (per `writers/notion.md` Flow — updating rows after Mode 2) appended under the row's Outcome. PM copies + sends it themselves. This is the default and applies to every team handoff and every AM ping unless the PM explicitly opts into the Slack send path. **Create parent task rows skip the handoff block entirely** (no delegate).
+   - **Slack (outbound-send only, narrow exception)** — `executors/slack.md` sends the handoff/ping via Slack only when the PM left an explicit `send` note on the row AND the audience matches a documented send path: (a) `audience = team` → team-handoff send to the delegate's Slack handle (resolved via the Slack handles reference block on the dated page — see `writers/notion.md`), (b) `audience = am` → AM-ping send to the AM's Slack handle (resolved via Preferences `AM Slack handle` field, also rendered on the dated page reference block). Without an explicit `send` note, the handoff stays as a Notion draft for the PM to copy. Create parent task rows are NEVER eligible for Slack send (no handoff exists).
+7. Before calling any executor, pass every string the assignee (delivery team) will read through `writers/plain-language.md` to enforce 4th–5th grade English.
+8. Pass every source reference through `writers/source-citation.md` to ensure proper citation format.
 
 Note: Email drafting paths (`executors/email.md`) are no longer triggered by queue rows — client and AM emails are PM-handled under the new gating rule. The email executor remains for operational sends (escalation backup ping, connector-failure tier-1 ping to PM) only — see `executors/email.md` for the 2 documented send exceptions.
 
@@ -138,6 +141,9 @@ For each row, after all its actions execute:
      - `Subtask #110890 created under parent #110464. Handoff draft for Hitesh appended below.`
      - `Subtask #110918 created under parent #109958. Handoff draft for Atul appended below.`
      - `Subtask created → Orbit #110523. Severity bumped to Important per your note. Handoff draft appended below.`
+   - Examples (Create parent task path):
+     - `Created parent task #111002 on Agency X → Orbit [link]. Assigned to you. You can spawn sub-tasks under this in future runs.`
+     - `Created parent task #111034 on BrightPath → Orbit [link]. Assigned to you. Due 2026-05-27 per signal urgency tokens. You can spawn sub-tasks under this in future runs.`
    - Examples (Slack send path, PM left explicit `send` note):
      - `Subtask #110890 created under parent #110464. Sent handoff to Hitesh on Slack (@hitesh).`
      - `Subtask #110918 created under parent #109958. Sent handoff to Atul on Slack (@atul) per your 'send' note.`
@@ -167,6 +173,7 @@ Inputs the builder collects:
 - For each qualifying row, pull from the executor return values: `client_name`, `project_name`, `task_title`, `task_id`, `orbit_task_url`, `assignee_first_name`, `assignee_full_name`.
 - Preserve matcher order (the same order the rows appear in the Morning Queue database).
 - Flag rows are NEVER included in the Pod Daily Task block (no Orbit task was created).
+- **Create parent task rows are NEVER included** either — the parent is PM-assigned, not a team handoff. Future sub-tasks under this parent will surface in subsequent days' Pod Daily Task blocks via the standard Create-subtask path.
 
 Skip silently if zero rows qualify or if `pod_daily_task_enabled = false`.
 
@@ -175,7 +182,7 @@ Skip silently if zero rows qualify or if `pod_daily_task_enabled = false`.
 Hand to `writers/notion.md` — Flow — appending the AM Daily Ping block.
 
 Inputs the builder collects:
-- The same qualifying-row set as Step 9a (subtask-create rows only — Flag rows excluded).
+- The same qualifying-row set as Step 9a (subtask-create rows only — Flag rows AND Create parent task rows both excluded).
 - Grouping: map each qualifying row to its AM via the Preferences Account Managers → Projects associations. Drop rows with no AM. Drop AMs listed in `quiet_ams`.
 - For each AM group: the AM identity fields from Preferences, plus the bundle of row contexts (summaries, recommended actions, resolved assignees) needed for the writer's drafting call.
 
@@ -197,6 +204,9 @@ Executed:
   • Solstice WP brochure swap → Subtask #110890 under parent #106447. Handoff draft for Atul appended.
   • Brother Plesk patch ETA → Subtask #110918 under parent #109958. Sent handoff to Atul on Slack per your 'send' note.
   • ECP AI Visibility audit → Subtask #110945 under parent #110464. Handoff draft for Hitesh appended.
+
+Parent tasks created (Possible Orbit miss):
+  • Agency X contact form → Parent #111002 created on Agency X. Assigned to you. You can spawn sub-tasks under this in future runs.
 
 Flagged (no auto-action):
   • 2010 Solutions — Ellen needs dev names for 27 May call. PM reply pending.
