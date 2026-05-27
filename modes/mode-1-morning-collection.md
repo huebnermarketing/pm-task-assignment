@@ -42,35 +42,39 @@ Extract:
 - **Monday override (IST):** if today is Monday, set `lookback = max(now − last_run, 72 hours)`. Cron is weekday-only, so the previous run was Friday — Monday must always capture the full Fri/Sat/Sun window even if a manual weekend run shrank `last_run`.
 - Cap lookback at 7 days to avoid overwhelming runs.
 
-#### 1c. Load Pod Matrix (cached for the run)
+#### 1c. Load Pod Matrix (cached for the run, fan-out launch)
+
+Launch in parallel with 1d (priority-pass filter), 1e (Orbit MCP fetch), and 2a (Gmail collector). Pod Matrix has no dependency on Orbit or Gmail responses — it is consumed by matcher Job 6 in Step 4, not by Step 1 collection. There is no reason to block the other Step 1 launches behind it.
 
 Call `references/pod-matrix.md` to fetch and parse the org Pod Matrix from `POD_MATRIX_URL` (injected by the Mode 1 routine prompt — see `ROUTINE-ENTRYPOINTS.md`).
 
 - On success: cache the parsed pools (PM matrix, floaters, functional matrices) plus the resolved Orbit user-id mapping for the rest of the run. `synthesis/pod-inference.md` reads from this cache.
 - On `POD_MATRIX_URL` absent (interactive surface or routine misconfiguration), fetch failure, or parse failure: log a one-line warning to the Run Log Decisions trace and continue. Pod-inference will gracefully degrade to Orbit-only inference (matrix-unavailable code path).
 
-This step is non-blocking: a matrix outage must never block the morning queue.
+This step is non-blocking: a matrix outage must never block the morning queue, and the matrix fetch never blocks any other Step 1 sub-step from launching.
 
-#### 1d. Orbit priority pass (sequential, BLOCKING)
+#### 1d. Orbit priority pass (local filter, NOT a blocking fetch)
 
-Call `collectors/orbit.md` with `priority_pass = true`. This pass narrows scope to parent tasks an Account Manager (AM) created or reassigned to the running PM overnight, with `due_date = today`.
+The priority pass is a **local filter + cross-reference computation** over the MCP responses fetched by 1e (Orbit normal pass). It makes ZERO new MCP calls of its own — it reuses 1e's `get_user_workload(PM)`, `get_activity_log`, and the cached `list_users` response. The "sequential, BLOCKING" framing from earlier spec versions was a defensive correctness measure for the dependency between this pass and matcher Job 1; that dependency is now encoded explicitly at the matcher entry point, not at the Step 1 launch point.
+
+**Launch model:** 1c (Pod Matrix), 1e (Orbit MCP fetch), and 2a (Gmail collector) fan out together right after 1b completes. 1d runs as a synchronous local computation as soon as 1e's MCP responses land — typically a few hundred milliseconds of filtering, no network. 2a does NOT wait for 1d to complete; it has no dependency on Orbit responses. The join point is 1f (post-collector assertion), which gates on `{1c, 1e (with 1d filtered output), 2a}` all completing.
+
+**Matcher entry-gate:** Matcher Job 1 reads `priority_signals[]` first (per Sort rule 0). It will not start until 1d's local-filter computation has completed and populated `priority_signals[]`. This dependency is encoded at the consumer (matcher entry), not enforced by artificially blocking 2a.
 
 Procedure (full details in `collectors/orbit.md` § Priority Pass):
 
-1. Resolve AM identities from Preferences (canonical email + aliases) to Orbit `user_id`s via the cached `list_users` response. The Pod Matrix fetch in 1c has already populated this cache.
-2. From the PM-workload response (`get_user_workload(PM_user_id, is_completed=incomplete, per_page=500)`, shared with 1e — call once and reuse), filter to tasks where `due_date == today (IST)` AND `assignee_id == PM_user_id`. This is the candidate set — typically a handful of tasks.
-3. Cross-reference against `get_activity_log` (also shared with 1e) for the AM actor on either `created_by` or `assignee_change` events since `last_run_timestamp`.
+1. Resolve AM identities from Preferences (canonical email + aliases) to Orbit `user_id`s via the cached `list_users` response. The Pod Matrix fetch in 1c may have already populated this cache; if 1c is still in flight when 1d starts, 1d calls `list_users` directly (cached so subsequent users get the same response).
+2. From the PM-workload response (`get_user_workload(PM_user_id, is_completed=incomplete, per_page=500)`, fetched by 1e — call once and reuse), filter to tasks where `due_date == today (IST)` AND `assignee_id == PM_user_id`. This is the candidate set — typically a handful of tasks.
+3. Cross-reference against `get_activity_log` (also from 1e) for the AM actor on either `created_by` or `assignee_change` events since `last_run_timestamp`.
 4. Return `priority_signals[]`, each carrying `signal_type: am_handed_to_pm_overnight_due_today`, `parent_task_id`, `am_actor_id`, `bypass_pm_action_filter: true`.
-
-This pass is sequential and blocking — 1e (Orbit normal pass) and 2a (Gmail collector) do not start until 1d returns. Rationale: priority-lane signals must lead the queue and must be available to matcher Job 4b as the anchor for context-link cross-referencing. The `get_user_workload(PM)` and `get_activity_log` calls happen here (or in 1e — same result either way since both passes use the same responses); the priority pass simply filters/cross-references first.
 
 If Preferences has zero AMs configured, the priority pass returns an empty list. Log `priority_pass_no_ams_configured` to Run Log and continue. Mode 1 still completes — only the priority lane is empty for this run.
 
-#### 1e. Orbit normal pass
+#### 1e. Orbit normal pass (fan-out launch)
 
-After 1d returns, fire the Orbit normal pass in parallel with 2a (Gmail collector). They are independent — do not wait for one before starting the other.
+Launches in parallel with 1c, 1d (which is a local filter over this pass's MCP responses), and 2a (Gmail collector). 1e is the **only** Orbit MCP-fetching step in Step 1 — 1d reuses its responses without making new calls.
 
-- `collectors/orbit.md` (normal pass — `priority_pass = false`) — universe is `get_user_workload(PM_user_id, is_completed=incomplete, per_page=500)` returning every open task assigned to the PM with full per-task details + summary counts. Activity since `last_run_timestamp` comes from `get_activity_log` (scoped to the workload task IDs). Tasks already surfaced in `priority_signals[]` are deduplicated by `task_id`. **No per-project iteration** — the workload call replaces the old `list_projects` + `get_project_task_list × N` loop entirely. See `collectors/orbit.md` § Universe model for the rationale and § MANDATORY tool call sequence for the exact tool order.
+- `collectors/orbit.md` (normal pass — `priority_pass = false`) — universe is `get_user_workload(PM_user_id, is_completed=incomplete, per_page=500)` returning every open task assigned to the PM with full per-task details + summary counts. Activity since `last_run_timestamp` comes from `get_activity_log` (scoped to the workload task IDs). Tasks surfaced in `priority_signals[]` by 1d's filter are deduplicated by `task_id` from the normal-pass output. **No per-project iteration** — the workload call replaces the old `list_projects` + `get_project_task_list × N` loop entirely. See `collectors/orbit.md` § Universe model for the rationale and § MANDATORY tool call sequence for the exact tool order.
 
 **Fathom is NOT called in this step.** Fathom is enrichment-only and is invoked lazily by the matcher during Step 3 (Enrich with Fathom) whenever it detects a meeting reference inside a primary signal. See `collectors/fathom.md` for the enrichment interface and trigger-phrase list.
 
@@ -81,9 +85,11 @@ If the Orbit normal pass fails (MCP unavailable, auth expired), do not abort Mod
 
 This note is included in the summary section at the top of the dated page.
 
-#### 1f. Post-collector assertion (MANDATORY)
+#### 1f. Post-collector assertion (MANDATORY — explicit join point for the fan-out)
 
-Before passing signals to the matcher (Step 4), verify the Orbit collector actually invoked its non-skippable tool sequence in BOTH the priority pass (1d) and the normal pass (1e). This guards against the runtime LLM taking a "fast path" that pulls workload metadata only and silently drops every comment + activity-log entry inside the lookback window.
+**This sub-step is the join point for the Step 1 + Step 2 fan-out launches.** 1c (Pod Matrix), 1d (priority-pass filter, which depends on 1e MCP responses), 1e (Orbit MCP fetch), and 2a (Gmail collector) all run in parallel; 1f does not start until ALL of them have completed (or failed-and-logged). Once 1f passes (or aborts), Mode 1 advances to Step 3 (Fathom enrichment) and Step 4 (synthesis). Matcher Job 1 entry then reads `priority_signals[]` first (per Sort rule 0) — that dependency is encoded at the matcher consumer, not at the producer.
+
+Before passing signals to the matcher (Step 4), verify the Orbit collector actually invoked its non-skippable tool sequence in 1e (which 1d also depends on). This guards against the runtime LLM taking a "fast path" that pulls workload metadata only and silently drops every comment + activity-log entry inside the lookback window.
 
 Additional priority-pass assertion: if `priority_signals[]` is non-empty, every entry must carry `bypass_pm_action_filter: true`. The matcher reads this flag to skip the PM-action drop rule (non-negotiable rule #19) for priority-lane signals. If the flag is missing on any priority signal, log `priority_pass_missing_bypass_flag` to Run Log and patch the flag to `true` before passing to the matcher.
 

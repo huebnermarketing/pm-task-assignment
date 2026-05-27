@@ -10,7 +10,7 @@ Pull overnight signals from Orbit that are relevant to **the PM's own todos** (e
 
 This collector runs in **two passes** during Mode 1:
 
-- **Pass A — Priority pass** (Mode 1 sub-step 1d, sequential, blocking). Narrow scope: parent tasks an AM created or reassigned to the running PM overnight, `due_date = today`. Output goes into a separate `priority_signals` list. See `## Priority Pass (Mode 1 sub-step 1d)` below.
+- **Pass A — Priority pass** (Mode 1 sub-step 1d — local filter + cross-reference over Pass B's MCP responses; zero new MCP calls of its own). Narrow scope: parent tasks an AM created or reassigned to the running PM overnight, `due_date = today`. Output goes into a separate `priority_signals` list. Runs synchronously after Pass B's MCP responses land; does NOT block 2a (Gmail collector) from launching. See `## Priority Pass (Mode 1 sub-step 1d)` below.
 - **Pass B — Normal pass** (Mode 1 sub-step 1e, parallel with the Gmail collector at 2a). Broad scope: every open task on the PM's plate (workload snapshot) + activity since `last_run_timestamp` (status changes, new comments, due-date moves, assignment changes). Output goes into the normal `orbit_signals` list. Behaves as documented in the sections below.
 
 Mode 2 invokes neither pass — execution reads the morning queue from Notion, not from a fresh Orbit pull.
@@ -23,9 +23,11 @@ Orbit has a direct user-scoped workload API: `get_user_workload(user_id, is_comp
 
 Tasks the PM follows but is NOT assigned to are intentionally out of scope here — if a follower-only task needs PM input, that ask reliably surfaces through Gmail (the AM emails the PM) and is captured by `collectors/gmail.md`. The morning queue is about the PM's own todos plus the items the PM hasn't yet acknowledged; Gmail is the safety net for everything outside the PM's direct task list (per Mode 1 Step 2 § Role of Gmail and matcher Job 5 § Possible Orbit miss detection).
 
-## Priority Pass (Mode 1 sub-step 1d)
+## Priority Pass (Mode 1 sub-step 1d — local filter, no MCP calls of its own)
 
-This pass runs FIRST in Mode 1, before any other collector. It produces the `priority_signals` list that lands in the top-of-queue priority lane. Triggered when Mode 1 invokes the collector with `priority_pass = true`.
+This pass is a **local filter + cross-reference computation** over the MCP responses fetched by the normal pass (1e). It makes ZERO new MCP calls — `get_user_workload(PM)`, `get_activity_log`, and `list_users` are all shared with 1e (called once, reused here). The "sequential, BLOCKING" framing from earlier spec versions was a defensive measure to ensure `priority_signals[]` was populated before matcher Job 1 read it; that dependency is now encoded explicitly at the matcher consumer (Job 1 entry-gate), not at the Step 1 launch graph. As a result, 2a (Gmail collector) does NOT wait for 1d to complete — Gmail has no Orbit dependency.
+
+Triggered when Mode 1 invokes the collector with `priority_pass = true`. It produces the `priority_signals` list that lands in the top-of-queue priority lane. The 1d filter runs synchronously as soon as 1e's MCP responses land — typically a few hundred milliseconds of in-memory filtering, no network.
 
 ### What it detects
 
@@ -105,6 +107,7 @@ Two fields are load-bearing for downstream matcher logic:
 
 - Does not pick the delegated assignee. PM did not choose one (the parent task sits with the PM, not a delegate). Assignee suggestion runs in `synthesis/matcher.md` Job 6 via the existing 4-branch tree — same logic as any other Create-subtask row.
 - Does not make a separate `get_user_workload` call — it reuses the one fired by the normal pass (step 2 of the mandatory sequence). The priority pass is a filter + cross-reference over that shared response, not an independent fetch.
+- Does not block 2a (Gmail collector) from launching. 2a fans out in parallel with 1c/1d/1e. The matcher Job 1 entry-gate enforces the priority-signals-must-be-populated invariant at the consumer, not by serializing collector launches.
 - Does not run in Mode 2. Mode 2 reads the morning queue from Notion, not Orbit.
 - Does not double-emit signals into the normal pass. A task surfaced as a priority signal is excluded from the normal pass's `new_task` signal type (deduplicate by `task_id`).
 
@@ -172,6 +175,8 @@ For every task that becomes a `Create subtask` or `Create parent task` row (typi
 2. **`list_task_comments(task_id)`** — full all-time comment history, NOT date-filtered to `last_run_timestamp`. The collection-phase `get_activity_log` returns deltas since last_run only; older decisions, prior client feedback, AM clarifications, failed attempts, scope changes live in comments from earlier weeks/months that the activity log won't surface.
 
 **Why both calls fire during synthesis, not collection.** Firing at collection time would mean calling `get_task_details` + `list_task_comments` for every task in the workload (typically 30-80), most of which won't become rows after Job 5 filtering — wasted API calls. Firing during Job 7 bounds the calls to the post-filter survivor set (typically 10-30 rows). This mirrors the lazy patterns already established for `fetch_enrichment()` (Fathom, Job 4b Pass 2) and `get_user_workload(candidate_user_id)` (pod-inference, Job 6 no-history fallback).
+
+**Issuance is a parallel batch, not serial per-row.** Matcher Job 7 issues `get_task_details(task_id)` + `list_task_comments(task_id)` for EVERY row in the post-Job-5 survivor set as parallel tool calls in one LLM turn — Claude Code supports multi-tool-use per turn. Batch cap: 25 parallel tool calls per turn; the matcher chunks larger survivor sets into multiple batches (rows 1–12, 13–24, etc.). Wall-clock estimate: serial would be ~8s for S=20 rows at ~200ms MCP latency × 40 calls; parallel one-batch issuance lands in ~250ms + overhead. Per-row failure semantics (one row's deep-read failure doesn't block other rows) are defined in `synthesis/matcher.md` Job 7 § Mandatory deep-read of the originating Orbit task.
 
 **Mandatory, not conditional.** Same default-on rule as the Gmail-thread enrichment (see `synthesis/matcher.md` Job 7 § Mandatory email-thread enrichment): do NOT skip these calls because the workload snapshot or the Orbit task title looks "complete enough". The runtime cannot judge completeness without reading; reading first is the only way to know.
 

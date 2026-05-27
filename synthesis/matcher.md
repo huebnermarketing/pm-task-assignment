@@ -84,6 +84,10 @@ A list of items. Each item becomes one row in the Morning Queue database. For ea
 
 ### Job 1 — Group signals by project
 
+**Entry-gate.** Job 1 reads `priority_signals[]` first (per Sort rule 0 — priority-lane rows lead the queue). Before any grouping work, verify `priority_signals[]` has been populated by Mode 1 sub-step 1d (the priority pass's local filter). If `priority_signals` is still `null` or `undefined` (rather than `[]` for "no priority signals this morning"), the matcher MUST wait for 1d to complete before proceeding. This is the explicit consumer-side encoding of the dependency between 1d and matcher — Mode 1's Step 1 launch graph deliberately does NOT serialize 1d ahead of 2a (Gmail collector); the dependency lives here, at the consumer.
+
+In practice, the join point at Mode 1 sub-step 1f ensures all collector outputs (including 1d's `priority_signals[]`) are populated before Step 4 (matcher invocation) begins. The Job 1 entry-gate is the second layer of defense — if 1f's join semantics were ever weakened, this gate still catches the missing input.
+
 Use the Orbit relationship map to connect each signal to a project.
 
 For Orbit signals: project is already on the signal.
@@ -389,7 +393,22 @@ For every task that becomes a Create-subtask or Create-parent-task row, the matc
 1. **`get_task_details(task_id)`** — full task body / description / all fields. Default-on, NOT conditional on whether the workload returned a description. The workload's truncation behavior is opaque; trust nothing about completeness.
 2. **`list_task_comments(task_id)`** — full all-time comment history, NOT date-filtered to `last_run_timestamp`. This is the load-bearing call for tasks with long prior conversation. The `get_activity_log` call already pulled in Step 1e covers only the deltas since last_run; the deep comment history (decisions, prior client feedback, AM clarifications, failed attempts, scope changes) lives in older comments that activity_log didn't surface.
 
-These calls fire lazily during Job 7 composition (per-row, on the survivor set after Job 5 — typically 10-30 rows, not the full 30-80 workload size). They are mandatory for the row classes that produce an Orbit body; Flag rows skip these calls since Flag rows don't produce a body.
+These calls fire during Job 7 composition (per-row, on the survivor set after Job 5 — typically 10-30 rows, not the full 30-80 workload size). They are mandatory for the row classes that produce an Orbit body; Flag rows skip these calls since Flag rows don't produce a body.
+
+**Issuance — parallel batch, not serial per-row.** After Job 5 filtering, collect the survivor set `S = { rows where action ∈ {Create subtask, Create parent task} }`. Then fan out the deep-read in a single LLM-turn batch:
+
+- Issue `get_task_details(task_id)` and `list_task_comments(task_id)` for EVERY row in S as parallel tool calls in one turn (Claude Code supports multi-tool-use per turn).
+- **Batch cap: 25 parallel tool calls per turn.** If `|S| × 2 > 25` (i.e., S > 12 rows), chunk the survivor set: first batch covers rows 1–12 (24 calls), second batch covers rows 13–24, etc. Chunk boundaries are arbitrary — order within S does not affect Job 7 composition since each row composes independently.
+- Wait for all batches to land before starting Job 7 body composition. Composition is row-by-row but ALL row inputs are gathered up-front via parallel issuance.
+
+**Wall-clock impact.** Serial issuance: |S| × 2 calls × MCP latency (~200ms each) = ~8s for S=20 rows. Parallel issuance: one batch of 25 calls = ~250ms + batch overhead. ~30× faster on this step.
+
+**Per-row failure semantics.** Each row's deep-read is an independent two-call pair; a failure on row X does not affect rows Y, Z, …
+
+- **Both calls succeed:** row X composes normally with full data.
+- **Only `get_task_details(X)` succeeds, `list_task_comments(X)` fails after retries:** compose row X's body from `get_task_details` + workload snapshot + the activity_log delta from Step 1e + Gmail/Fathom enrichment. Append `Uncertain: comment history unavailable for this row — proposed body may miss prior decisions older than <last_run_timestamp>.` to row X's AI Notes. Row still ships; PM sees the caveat.
+- **Only `list_task_comments(X)` succeeds, `get_task_details(X)` fails after retries:** compose row X's body from the workload snapshot's truncated description + comments + Gmail/Fathom enrichment. Append `Uncertain: full task details unavailable for this row — description in body uses workload snapshot only.` to AI Notes. Row still ships.
+- **Both calls fail after retries:** mark row X's Outcome with `FAILED — deep-read incomplete for this row; manual review needed before approval. Mode 2 will skip execution.` Row stays at Status `Recommended Action` and is excluded from Mode 2 execution dispatch even if PM marks Approved (Mode 2 reads the FAILED-deep-read flag and skips with a warning Outcome). The matcher does NOT attempt to compose a body from workload-snapshot alone in this case — too much risk of confidently-wrong content.
 
 Pull every fact from the full task + comment history that's relevant to the proposed sub-task — prior decisions, named POCs already involved, failed attempts to avoid, scope clarifications, dependencies, deadlines mentioned in earlier comments. Weave them into the 6-section body per the per-section mapping below.
 

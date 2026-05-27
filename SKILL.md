@@ -86,20 +86,21 @@ EVERY ENTRY POINT (scheduled or manual):
 
 Mode 1 (scheduled collection — 4 conceptual steps, lettered sub-steps below):
   → preflight
-  → Step 1 — Pull from Orbit:
+  → Step 1 — Pull from Orbit (1c + 1d + 1e + 2a fan-out launch after 1b; 1f is the join point):
     → 1a. Read Preferences (already loaded by preflight)
     → 1b. Determine lookback window (default 12h, Monday override = max(now − last_run, 72h))
-    → 1c. references/pod-matrix.md — fetch + parse Pod Matrix from POD_MATRIX_URL (cached for run; gracefully degrades to Orbit-only on absence/failure)
-    → 1d. Orbit priority pass (sequential, blocking):
+    → 1c. references/pod-matrix.md — fetch + parse Pod Matrix from POD_MATRIX_URL (parallel; cached for run; gracefully degrades to Orbit-only on absence/failure)
+    → 1d. Orbit priority pass (LOCAL filter over 1e's MCP responses — zero new MCP calls; runs synchronously after 1e responses land):
       → collectors/orbit.md with priority_pass=true
-      → Detects parent tasks an AM created or reassigned to the running PM overnight with due_date=today
+      → Detects parent tasks an AM created or reassigned to the running PM overnight with due_date=today (filter PM-workload by due_date=today, cross-ref activity_log for AM-actor events)
       → Output: priority_signals[] each carrying parent_task_id + am_actor + bypass_pm_action_filter=true
-    → 1e. Orbit normal pass (parallel with 2a):
-      → collectors/orbit.md (normal pass: comments, status changes, overdue, new tasks not in priority pass)
+      → Matcher Job 1 entry-gates on this — dependency encoded at consumer, NOT by blocking 2a
+    → 1e. Orbit normal pass (parallel with 1c/1d/2a — the ONLY Orbit MCP-fetching step in Step 1):
+      → collectors/orbit.md normal pass: get_user_workload(PM) + get_activity_log + list_users (shared with 1d), plus comments/status/overdue/new tasks not in priority pass
       [Fathom NOT called here — lazy-fetched by matcher in Step 3 only when a primary signal references a meeting]
-    → 1f. Post-collector assertion (MANDATORY) — abort if Orbit's get_activity_log was skipped
+    → 1f. Post-collector assertion (MANDATORY — explicit join point for the {1c, 1d, 1e, 2a} fan-out) — aborts if get_user_workload(PM) OR get_activity_log were skipped
   → Step 2 — Pull from Mail:
-    → 2a. collectors/gmail.md (parallel with 1e) — Gmail signals + context-link metadata (project_id_candidates, actor_emails, topic_keywords, timestamp)
+    → 2a. collectors/gmail.md (parallel with 1c/1d/1e — launched at the same fan-out point; no Orbit dependency) — Gmail signals + context-link metadata (project_id_candidates, actor_emails, topic_keywords, timestamp)
     → 2b. Possible-Orbit-miss safety-net (cross-reference to matcher Job 5; executed during Step 4)
   → Step 3 — Enrich with Fathom (lazy, on-demand):
     → 3a. Matcher Job 4b Pass 2 — scan every primary signal for meeting-reference trigger phrases per collectors/fathom.md
@@ -112,7 +113,7 @@ Mode 1 (scheduled collection — 4 conceptual steps, lettered sub-steps below):
       → Job 5: action classification — one of three locked verbs: Create subtask, Flag, or Create parent task (Possible Orbit miss — Gmail-only critical signal with no Orbit corroboration; project must be unambiguous)
       → Job 6: 4-branch assignee tree (history → matrix → floater → cross-matrix Uncertain) — runs for priority-lane too since PM did not pick a delegate; Create parent task rows short-circuit to PM
       → Job 7: compose the 6-section Orbit body — MANDATORY per-row deep-read of FOUR sources (unconditional, default-on):
-        ① Originating Orbit task in full — lazy per-row get_task_details + list_task_comments (full all-time comment history, NOT date-filtered — older comments hold prior decisions / failed attempts / scope changes)
+        ① Originating Orbit task in full — per-row get_task_details + list_task_comments (full all-time comment history, NOT date-filtered — older comments hold prior decisions / failed attempts / scope changes). **Issued as parallel batch (cap 25 calls/turn, chunked if S > 12 rows); per-row failure → Uncertain AI Note or FAILED-deep-read flag**
         ② Every attached Gmail context_signal — thread end-to-end, including long multi-day threads
         ③ Every signal.enrichment.fathom — meeting summary + action items
         ④ External docs referenced by any of the above (per references/external-doc-access.md)

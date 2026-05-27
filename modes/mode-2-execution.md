@@ -110,6 +110,7 @@ For each row, decide what to do:
 | `Approved` + no note | Execute the skill's original recommendation as-is. |
 | `Approved` + note | Honor the note (note wins over status). Route to `synthesis/note-interpreter.md`. |
 | `Done` | Already executed in a prior run. Skip. |
+| Outcome starts with `FAILED — deep-read incomplete` (any Status) | Skip execution even if Status = `Approved`. The row's body was not composed from the full task + comment history (Job 7 per-row deep-read failed in Mode 1); executing it would write incomplete content to Orbit. Replace Outcome with `Skipped Mode 2 execution — Mode 1 deep-read failed; manual review needed. Re-fire Mode 1 with retry to refresh this row.` Log: `mode2_skip_failed_deep_read`. |
 
 ### Step 6 — Execute per row
 
