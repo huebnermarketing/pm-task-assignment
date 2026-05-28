@@ -27,9 +27,9 @@ The database has **10 columns total**. All 10 are visible in the default view, i
 | Visible in default view | YES (column 1 — leftmost) |
 | Set by | Mode 1 (the matcher), via `synthesis/matcher.md` |
 | Editable by PM | Yes, but rare — the matcher writes a good summary, PM usually doesn't change it |
-| Default value | A one-line verb-first action sentence per `synthesis/matcher.md` Job 4. Starts with one of THREE locked verbs: `Create subtask`, `Flag`, or `Create parent task`. No other openers permitted. For `Create subtask` rows, the proposed sub-task title appears inside the Summary so the PM reads it without opening the row detail page. For `Create parent task` rows, the proposed parent title appears in the Summary and the assignee literal is `you`. |
+| Default value | A one-line **professional topic-style** description per `synthesis/matcher.md` Job 4. Names the deliverable / scope / subject of the work — NOT the PM action. Plain text, no emojis, no decorative glyphs. The action verb (`Create subtask` / `Reopen subtask` / `Hand off parent task` / `Flag` / `Create parent task`) lives in the `Recommended Action` column and the row's top callout, never in the Summary text. Format: `<deliverable / scope phrase> — <client or project short name> [#<project_number>]`. `project_number` is Orbit's user-visible project code (e.g. `16915`), NOT the internal `id`. |
 | Maximum length | Capped at 120 chars (the matcher enforces this — see Job 4 rules). |
-| Sample values | `Create subtask on ECP AI Visibility Audit #110464 — Run AI Visibility audit on approved competitor list. To Hitesh.` <br> `Create subtask on Solstice WP #106447 — Swap Contact Form brochure PDF. To Atul.` <br> `Flag 2010 Solutions — Ellen needs dev names for 27 May call. PM action.` <br> `Flag Conversant FTP — credentials still missing, blocking dev work today. PM action.` <br> `Create parent task on Agency X — Investigate broken contact form ASAP. To you.` |
+| Sample values | `Quote for Mega Menu restructure and four new pages — Process Barron change order #16915` <br> `AI Visibility audit on approved competitor list — ECP audit #16842` <br> `Contact Form brochure PDF replacement — Solstice WP #16720` <br> `Plesk patch ETA confirmation with WP Maintenance — Brother Site Issues #16631` <br> `Dev name nominations required for 27 May Joe Warner call — 2010 Solutions` <br> `Missing FTP credentials blocking development — Conversant` <br> `Contact form outage reported by client, time-critical — Agency X (Possible Orbit miss)` |
 
 ### Column 2 — `AI Notes`
 
@@ -65,9 +65,9 @@ The database has **10 columns total**. All 10 are visible in the default view, i
 | Visible in default view | YES (column 4) |
 | Set by | Mode 1 (the matcher) |
 | Editable by PM | Yes — but typically the matcher gets it right |
-| Default value | Orbit project name + Orbit project code, format: `<Project Name> (#<orbit_project_id>)`. For Maintenance / Ad-hoc style projects, append the type suffix (e.g., `— Maintenance`). |
+| Default value | Orbit project name + Orbit project code, format: `<Project Name> (#<project_number>)`. **`project_number`** is the user-visible Orbit project code (string from `get_project_details.project_number`, e.g. `"16915"`), NEVER the internal `id` field (per `SKILL.md` non-negotiable rule #22). For Maintenance / Ad-hoc style projects, append the type suffix (e.g., `— Maintenance`). |
 | Allowed empty value | `Standalone` (item not tied to a specific Orbit project — e.g., a Gmail-only signal that can't be mapped to a project) |
-| Sample values | `ECP AI Visibility Audit (#8545)` <br> `Brother Site Issues (#8461) — Maintenance` <br> `Agency X — Homepage Redesign (#9012)` <br> `Standalone` |
+| Sample values | `ECP AI Visibility Audit (#16842)` <br> `Brother Site Issues (#16631) — Maintenance` <br> `Agency X — Homepage Redesign (#16910)` <br> `Standalone` |
 
 ### Column 5 — `Recommended Action`
 
@@ -77,9 +77,9 @@ The database has **10 columns total**. All 10 are visible in the default view, i
 | Visible in default view | YES (column 5) |
 | Set by | Mode 1 (the matcher) |
 | Editable by PM | Yes, but rare — PM usually drops a note in `PM Notes` instead of editing this column |
-| Default value | A short phrase describing one of the three locked actions (`Create subtask`, `Flag`, or `Create parent task`) plus what Mode 2 will do. Per `synthesis/matcher.md` Job 5 the action set is closed to these three. |
+| Default value | A short phrase starting with one of the five locked verbs (`Create subtask`, `Reopen subtask`, `Hand off parent task`, `Flag`, `Create parent task`) describing what Mode 2 will do. Per `synthesis/matcher.md` Job 5 + 5a + 5.5 the action set is closed to these five. |
 | Maximum length | Recommend under 100 chars for scannability |
-| Sample values | `Create subtask under #110464, assign to Hitesh (SEO/AI) + handoff draft` <br> `Create subtask under #106447, assign to Atul (WP) + handoff draft` <br> `Flag — PM owns next step (reply to Ellen). No Mode 2 action.` <br> `Create parent task on Agency X assigned to you` |
+| Sample values | `Create subtask under #110464, assign to Hitesh (FE) + handoff draft` <br> `Reopen subtask #110890 under #110464 — back to Atul (WP), new work comment` <br> `Hand off parent task #110464 to Pravin (Quoting lead)` <br> `Flag — PM owns next step (reply to Ellen). No Mode 2 action.` <br> `Create parent task on Agency X assigned to you` |
 
 ### Column 6 — `Recommended Assignee`
 
@@ -224,8 +224,8 @@ Every row created by Mode 1 must have:
 
 - `Summary` populated — never empty
 - `AI Notes` — populated only if there's something notable; empty otherwise (priority-lane rows always populate this with the matcher's `<AM> put this on your plate overnight…` line)
-- `Orbit Task Link` — populated with the parent task URL for `Create subtask` rows; populated with the bound task URL for `Flag` rows that have one; set to `—` (or left empty) for `Flag` rows with no underlying Orbit task AND for `Create parent task` rows (no Orbit task exists at row-create time — the URL of the parent created by Mode 2 lands in `Outcome`, never in `Orbit Task Link`)
-- `Project` populated with `<name> (#<orbit_project_id>)` OR set to `Standalone`
+- `Orbit Task Link` — populated with the parent task URL for `Create subtask`, `Reopen subtask`, and `Hand off parent task` rows; populated with the bound task URL for `Flag` rows that have one; set to `—` (or left empty) for `Flag` rows with no underlying Orbit task AND for `Create parent task` rows (no Orbit task exists at row-create time — the URL of the parent created by Mode 2 lands in `Outcome`, never in `Orbit Task Link`)
+- `Project` populated with `<name> (#<project_number>)` (Orbit's user-visible project code, NOT the internal `id` per SKILL.md non-negotiable #22) OR set to `Standalone`
 - `Recommended Action` populated (or a clear placeholder if there's truly no action — rare)
 - `Recommended Assignee` populated OR set to `—` for advisory items
 - `Outcome` — empty (Mode 2 fills it)
@@ -264,44 +264,76 @@ When the schema needs to evolve (e.g., adding a column in a future version), use
 
 ---
 
-## Sample row — Create subtask (project work)
+## Sample row — Create subtask (HTML_CSS pod-resource work)
 
 | Column | Value |
 |---|---|
-| Summary | `Create subtask on ECP AI Visibility Audit #110464 — Run AI Visibility audit on approved competitor list. To Hitesh.` |
-| AI Notes | `Parent picked: #110464 (Signed SOW) — only PM-owned task open on this project.` |
-| Orbit Task Link | `https://app.orbit.io/projects/8545/tasks/110464` |
-| Project | `ECP AI Visibility Audit (#8545)` |
-| Recommended Action | `Create subtask under #110464, assign to Hitesh (SEO/AI) + handoff draft` |
-| Recommended Assignee | `Hitesh Asnani (SEO/AI) — Marketing/SEO Matrix, in followers, Ellen named him in approval comment` |
-| Outcome | `Subtask #110890 created under parent #110464 (https://app.orbit.io/projects/8545/tasks/110890). Handoff draft for Hitesh appended below (copy from row page).` |
+| Summary | `AI Visibility audit on approved competitor list — ECP audit #16842` |
+| AI Notes | `Parent picked: #110464 (Signed SOW) — only PM-owned task open on this project. work_type: AUDIT routed to Marketing/SEO pool leader.` |
+| Orbit Task Link | `https://app.whitelabeliq.com/93640173/project/.../110464` |
+| Project | `ECP AI Visibility Audit (#16842)` |
+| Recommended Action | `Hand off parent task #110464 to Manan (Marketing/SEO lead)` |
+| Recommended Assignee | `Manan (Marketing/SEO lead) — handoff target for AUDIT work` |
+| Outcome | `Parent #110464 reassigned to Manan (Marketing/SEO lead). PM kept as follower. Handoff comment posted.` |
 | PM Notes | *(empty — PM accepted the recommendation)* |
 | Source Systems | `Gmail, Orbit` |
 | Status | `Approved` |
 
-## Sample row — Create subtask (Ad-hoc / Maintenance work, also Create subtask now)
+> Note: above row is `Hand off parent task` because the work_type is `AUDIT`. A `Create subtask` row would have a pod-resource work_type (HTML_CSS / PHP_BACKEND / QA); see Maintenance sample below.
+
+## Sample row — Create subtask (PHP_BACKEND, Maintenance project)
 
 | Column | Value |
 |---|---|
-| Summary | `Create subtask on Brother Plesk #109958 — Investigate patch ETA with WP Maintenance. To Atul.` |
-| AI Notes | `Maintenance project type — previously this would have been a Reassign row; new rule unifies on Create subtask under the PM-owned parent. Fathom enrichment fetched: Orbit comment from Atul referenced "yesterday's WP Maintenance sync" — meeting recording attached as enrichment under Sources.` |
-| Orbit Task Link | `https://app.orbit.io/projects/8461/tasks/109958` |
-| Project | `Brother Site Issues (#8461) — Maintenance` |
+| Summary | `Plesk patch ETA confirmation with WP Maintenance — Brother Site Issues #16631` |
+| AI Notes | `Maintenance project type. work_type: PHP_BACKEND routed to WP matrix. Fathom enrichment fetched: Orbit comment from Atul referenced "yesterday's WP Maintenance sync" — meeting recording attached as enrichment under Sources.` |
+| Orbit Task Link | `https://app.whitelabeliq.com/93640173/project/.../109958` |
+| Project | `Brother Site Issues (#16631) — Maintenance` |
 | Recommended Action | `Create subtask under #109958, assign to Atul (WP) + handoff draft` |
 | Recommended Assignee | `Atul Mehra (WP) — WP Maintenance lead, 2 prior tasks on Brother last 3mo` |
-| Outcome | `Subtask #110918 created under parent #109958 (https://app.orbit.io/projects/8461/tasks/110918). Handoff draft for Atul appended below (copy from row page).` |
+| Outcome | `Subtask #110918 created under parent #109958. Handoff draft for Atul appended below (copy from row page).` |
 | PM Notes | *(empty)* |
 | Source Systems | `Orbit, Fathom` |
+| Status | `Approved` |
+
+## Sample row — Reopen subtask (existing subtask of same work_type already under parent)
+
+| Column | Value |
+|---|---|
+| Summary | `Mega Menu restructure and four new pages mirroring the existing parent/child pattern — Process Barron change order #16915` |
+| AI Notes | `Existing HTML_CSS subtask #110890 found under parent #111437 (work_type match). Reopen instead of duplicate. Last dev: Vijay Patel (last non-PM comment 5 days ago).` |
+| Orbit Task Link | `https://app.whitelabeliq.com/93640173/project/51083298598/111437` |
+| Project | `Process Barron Change Order (#16915)` |
+| Recommended Action | `Reopen subtask #110890 under #111437 — back to Vijay (FE), new work comment` |
+| Recommended Assignee | `Vijay Patel (FE) — back on the existing subtask #110890 they last worked` |
+| Outcome | `Reopened subtask #110890 under parent #111437 → Orbit [link]. Reassigned to Vijay Patel. Comment posted. Handoff draft for Vijay appended below.` |
+| PM Notes | *(empty)* |
+| Source Systems | `Orbit, Gmail` |
+| Status | `Approved` |
+
+## Sample row — Hand off parent task (work_type = QUOTE, no subtask)
+
+| Column | Value |
+|---|---|
+| Summary | `Quote for Mega Menu restructure and four new pages — Process Barron change order #16915` |
+| AI Notes | `work_type: QUOTE routed to Quoting pool leader. No subtask created — handoff path.` |
+| Orbit Task Link | `https://app.whitelabeliq.com/93640173/project/51083298598/111437` |
+| Project | `Process Barron Change Order (#16915)` |
+| Recommended Action | `Hand off parent task #111437 to Pravin (Quoting lead)` |
+| Recommended Assignee | `Pravin Kanzariya (Quoting lead) — handoff target for QUOTE work` |
+| Outcome | `Parent #111437 reassigned to Pravin Kanzariya (Quoting lead). PM kept as follower. Handoff comment posted.` |
+| PM Notes | *(empty)* |
+| Source Systems | `Orbit, Gmail` |
 | Status | `Approved` |
 
 ## Sample row — Priority lane (AM-assigned parent task overnight, due today)
 
 | Column | Value |
 |---|---|
-| Summary | `Create subtask on Conversant Phase 2 #112004 — Hand off Sprint 12 dev planning to Vijay. Due today.` |
-| AI Notes | `Caitlin put this on your plate overnight, due today. Proposed delegate: Vijay Patel (history on project — 3 sprints prior). Gmail thread cross-linked under Sources (Job 4b Pass 1). Fathom call from yesterday fetched as enrichment (Job 4b Pass 2 — Caitlin's comment referenced the call).` |
-| Orbit Task Link | `https://app.orbit.io/projects/9012/tasks/112004` |
-| Project | `Conversant Phase 2 (#9012)` |
+| Summary | `Sprint 12 development planning handoff — Conversant Phase 2 #16774` |
+| AI Notes | `Caitlin put this on your plate overnight, due today. Proposed delegate: Vijay Patel (history on project — 3 sprints prior). work_type: HTML_CSS → FE pod. Gmail thread cross-linked under Sources. Fathom call from yesterday fetched as enrichment.` |
+| Orbit Task Link | `https://app.whitelabeliq.com/93640173/project/.../112004` |
+| Project | `Conversant Phase 2 (#16774)` |
 | Recommended Action | `Create subtask under #112004, assign to Vijay (FE) + handoff draft` |
 | Recommended Assignee | `Vijay Patel (FE) — primary FE on Conversant, 3 prior sprints` |
 | Outcome | *(empty until Mode 2 fires)* |
@@ -313,10 +345,10 @@ When the schema needs to evolve (e.g., adding a column in a future version), use
 
 | Column | Value |
 |---|---|
-| Summary | `Flag 2010 Solutions — Ellen needs dev names for 27 May call. PM action.` |
+| Summary | `Dev name nominations required for 27 May Joe Warner call — 2010 Solutions` |
 | AI Notes | `PM-action detection: no PM-sent reply on the thread between signal arrival 2026-05-15 21:00 IST and Mode 1 fire. Flag emitted.` |
 | Orbit Task Link | `—` |
-| Project | `2010 Solutions FTE Works (#6994)` |
+| Project | `2010 Solutions FTE Works (#16320)` |
 | Recommended Action | `Flag — PM owns next step (reply to Ellen). No Mode 2 action.` |
 | Recommended Assignee | `— (PM action)` |
 | Outcome | *(empty — Mode 2 does not execute Flag rows. PM marks Skip when resolved.)* |
@@ -328,13 +360,13 @@ When the schema needs to evolve (e.g., adding a column in a future version), use
 
 | Column | Value |
 |---|---|
-| Summary | `Create parent task on Agency X — Investigate broken contact form ASAP. To you.` |
+| Summary | `Broken contact form, client says ASAP — Agency X (Possible Orbit miss)` |
 | AI Notes | `Possible Orbit miss: critical-language signal from jane@agencyx.com with no corroborating Orbit task. Creating parent task on Agency X on your approval.` |
 | Orbit Task Link | `—` |
-| Project | `Agency X — Homepage Redesign (#9012)` |
+| Project | `Agency X — Homepage Redesign (#16910)` |
 | Recommended Action | `Create parent task on Agency X assigned to you` |
 | Recommended Assignee | `You (PM) — Parent task assigned to you so you can spawn sub-tasks in later runs.` |
-| Outcome | *(empty until Mode 2 fires; after execution: `Created parent task #111002 on Agency X → Orbit [link]. Assigned to you. You can spawn sub-tasks under this in future runs.`)* |
+| Outcome | *(empty until Mode 2 fires; after execution: `Created parent task #111002 on Agency X → Orbit [link]. Assigned to you.`)* |
 | PM Notes | *(empty — PM accepts the recommendation, or adds note like "high priority, due today")* |
 | Source Systems | `Gmail` (after Mode 2 execution: `Gmail, Orbit`) |
 | Status | `Recommended Action` |

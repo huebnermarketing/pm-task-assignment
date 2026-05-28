@@ -22,16 +22,19 @@ This applies across all sender classification, all routing decisions, and all as
 
 If a signal involves an email address that doesn't match the canonical OR any alias of any known WLIQ identity, the sender is classified as `unknown` and the matcher proceeds with reduced confidence (often flagging `Uncertain:` in AI Notes).
 
-## Output gating — two actionable paths only
+## Output gating — five locked verbs
 
-The Morning Queue exists to drive **two AI actions and only two**:
+The Morning Queue exists to drive **exactly five AI actions and only five**:
 
-1. **Create sub-task under the PM's own parent task on that project** — universal across every project type (`Fixed Cost`, `SaaS`, `PPC`, `Hosting`, `Hourly`, `Repeat`, `Ad-hoc`, `Maintenance`, plus any new project type Orbit may add). Parent task **must be currently assigned to the running PM** (`assignee_id == PM_user_id`). Sub-task carries an explicit `task_title` AND the full 6-section `schemas/orbit-dq-standard.md` brief. There is no project-type bucket split — every actionable signal becomes a sub-task. (Previously Ad-hoc/Maintenance used a separate "Reassign" path; that path is retired — Ad-hoc/Maintenance signals now also become sub-tasks under the PM's parent so the team handover follows the same shape every time.)
-2. **Flag overnight signal for PM attention** — for signals the PM needs to see and act on personally, where AI cannot create a sub-task (no clear dev work to delegate, or the next move is PM-owned: email a client, decide a scope question, reply to an AM). Flag rows carry summary + sources + suggested PM-next-step. They do NOT execute in Mode 2 — they sit as a PM-readable item that the PM resolves manually (then marks `Skip. No Action Needed`).
+1. **`Create subtask`** — pod-resource work (work_type ∈ HTML_CSS, PHP_BACKEND, QA) landing under the PM-owned parent task. No matching open subtask of the same work_type exists. Sub-task carries an explicit `task_title` AND the full 6-section `schemas/orbit-dq-standard.md` brief.
+2. **`Reopen subtask`** — same as Create subtask BUT an existing open subtask of matching work_type already sits under the parent (Job 5.5 detected it). Executor reopens the existing subtask, posts new-work comment, reassigns to last non-PM dev. No new task created.
+3. **`Hand off parent task`** — non-pod work (work_type ∈ AUDIT, QUOTE, SEO, DESIGN, CONTENT, BA). Executor reassigns the existing PM-owned parent directly to the functional pool leader; PM stays as internal follower. No subtask.
+4. **`Flag`** — signal needs PM attention but is not delegate-able (PM owns next move: client email, scope decision, AM reply). No auto-execution. Flag rows carry summary + sources + suggested PM-next-step. PM resolves manually and marks `Skip. No Action Needed`.
+5. **`Create parent task`** — Possible Orbit miss; Gmail-only critical-language signal with NO corroborating Orbit task. On PM approval, Mode 2 creates the parent on the resolved project assigned to the PM, so the PM can spawn sub-tasks under it in later runs.
 
-The "PM's own task on that project overnight" semantic is the load-bearing constraint for path 1: the PM holds a parent task for each active engagement (e.g., the engagement's umbrella "Discovery", "Reference", or named meeting/milestone task). Sub-tasks for that engagement land under the PM's parent so the PM remains the project's coordination anchor in Orbit. If no PM-owned task exists on a project that needs new work, the row downgrades to a Flag row asking the PM to seed a parent task — see Job 5 "Picking the parent task" for the fallback.
+The "PM's own parent task on that project" semantic is the load-bearing constraint for paths 1, 2, and 3: the PM holds a parent task for each active engagement. Verbs 1+2 spawn / reuse sub-tasks under that parent; verb 3 reassigns the parent itself. If no PM-owned task exists on a project that needs new work, the row downgrades to a Flag row asking the PM to seed a parent task — see Job 5 "Picking the parent task" for the fallback (applies to verbs 1+2+3).
 
-Every signal that cannot reduce to one of these two actions — AND that the PM has already handled overnight (see "PM-action detection" below) — is **dropped from the queue**. Dropped signals are recorded in the Run Log detail page under a `Filtered signals` section so the PM can audit what was suppressed and why (see Job 11).
+Every signal that cannot reduce to one of these five actions — AND that the PM has already handled overnight (see "PM-action detection" below) — is **dropped from the queue**. Dropped signals are recorded in the Run Log detail page under a `Filtered signals` section so the PM can audit what was suppressed and why (see Job 11).
 
 ### Drop list (do NOT emit a queue row for any of these)
 
@@ -68,9 +71,11 @@ This rule directly fixes the over-flagging observed in early runs. The PM action
 
 A list of items. Each item becomes one row in the Morning Queue database. For each item, the matcher sets:
 
-- `summary` — one-line plain-English summary the PM reads (in normal professional English, not simplified)
-- `project` — render-ready string for the Notion `Project` column: `<Orbit project name> (#<orbit_project_id>)`, plus `— Maintenance` / `— Ad-hoc` suffix when the project type warrants. `Standalone` when no project resolves.
-- `project_name` and `orbit_project_id` — separate raw fields preserved alongside `project` for downstream consumers (writers, executors) that need them split
+- `summary` — one-line plain-English summary the PM reads (in normal professional English, not simplified). **Topic-style — names the deliverable / scope, NOT the PM action**. The action verb lives in `Recommended Action` column and the row's top callout. See Job 4 for composition rules and samples.
+- `task_brief` — short paragraph (2–4 sentences) rendered below the Summary heading on the row detail page. Describes what the work is about + the new update / latest signal content that triggered this row. Pulled primarily from the most recent input signal (top of email thread, latest Orbit comment, new AM clarification) — not from the older parent-task description. See Job 7b for composition rules.
+- `work_type` — classifier output from Job 5a; one of `HTML_CSS | PHP_BACKEND | QA | AUDIT | QUOTE | SEO | DESIGN | CONTENT | BA | OTHER`. Drives Job 5 action choice and Job 6 pod-boundary routing.
+- `project` — render-ready string for the Notion `Project` column: `<Orbit project name> (#<project_number>)`, plus `— Maintenance` / `— Ad-hoc` suffix when the project type warrants. `Standalone` when no project resolves. **`project_number` is Orbit's user-visible project code (string, e.g. `"16915"`), NOT the internal `id` field — per SKILL.md non-negotiable rule #22.**
+- `project_name`, `project_number`, and `orbit_project_id` — separate raw fields preserved alongside `project` for downstream consumers. `project_number` (string from `get_project_details.project_number`) is the user-visible identifier; `orbit_project_id` (int from `get_project_details.id`) is the internal PK used only inside URLs and the relationship map.
 - `orbit_task_link` — render-ready URL for the Notion `Orbit Task Link` column. For `Create subtask` rows: the Orbit URL of the pinned `parent_task_id` (priority lane) OR the inferred PM-owned parent task. For `Flag` rows: the Orbit URL of the bound task if the flag is anchored to one; `—` (em-dash, written as plain text into the URL field, or left empty) when no Orbit task is bound (e.g., a Gmail-only flag for PM action). The sub-task that Mode 2 may create is NOT placed here — it goes into `outcome` only.
 - `recommended_action` — short phrase, e.g., "Create task + handoff to Vijay"
 - `recommended_assignee` — name + short reason
@@ -124,55 +129,55 @@ For each item where the matcher has any uncertainty, add a line to AI Notes that
 
 The PM resolves uncertainty by reviewing and either splitting further, writing a PM Note, or leaving it at Recommended Action.
 
-### Job 4 — Generate the one-line summary (verb-first, locked vocabulary)
+### Job 4 — Generate the one-line summary (topic-style, deliverable-first)
 
-Normal professional English. This is what the PM reads when scanning the queue. The summary is **action-led** — the first token is a locked verb, the rest is the smallest context clause needed to identify the work.
+Normal professional English. This is what the PM reads when scanning the queue. The summary is **topic-led, NOT action-led** — it names the deliverable / scope / subject of the work, not what the PM is being asked to do. The PM action verb lives in the `Recommended Action` column and the row's top Action Block callout, NOT in the Summary text.
 
-#### Locked verb list (exactly 3 verbs — no others permitted)
+This is a deliberate rollback from an earlier verb-first / action-led Summary rule. Reason: PMs scanning the queue want to know "what is this row about" before they care about what they're being asked to do. The verb is redundant in Summary because (a) the `Recommended Action` column already states it explicitly, (b) the top callout on the row detail page restates it, (c) when every row starts with the same handful of verbs the column visually flattens and stops aiding scan. Topic-led Summaries let the deliverable / client context land first.
+
+#### Locked verb list — applies to `Recommended Action` column and Action Block callouts, NOT to Summary
+
+There are exactly five locked verbs. Each row picks one in Job 5 + 5a + 5.5. The Summary text contains the deliverable / scope; the verb appears in `Recommended Action` (Notion column) and in the top callout on the row detail page.
 
 | Verb | Used when |
 |---|---|
-| `Create subtask` | Net-new scoped work landing under the PM's own parent task on the project. Universal across project types — including Ad-hoc and Maintenance. |
+| `Create subtask` | Net-new pod-resource work (work_type ∈ HTML_CSS, PHP_BACKEND, QA) landing under the PM-owned parent task. No existing open subtask of the same work_type exists under the parent. |
+| `Reopen subtask` | Same pod-resource work_type, but an existing open subtask already sits under the parent (Job 5.5 detected it). Executor flips status, appends new-work comment, reassigns to last non-PM dev. |
+| `Hand off parent task` | Work that does NOT touch HTML/PHP/QA pod resources (work_type ∈ QUOTE, SEO, AUDIT, DESIGN, CONTENT, BA). Executor reassigns the existing PM-owned parent directly to the pod leader; no subtask. |
 | `Flag` | Signal needs PM attention but is not delegate-able (PM owns next move: client email, scope decision, AM reply). No auto-execution. |
-| `Create parent task` | Gmail-only signal carrying critical-language tokens that has NO matching Orbit task — i.e. an item the PM appears to have missed in Orbit. On PM approval, Mode 2 creates a parent Orbit task on the resolved project assigned to the PM, so the PM can subsequently spawn sub-tasks under it. See "Possible Orbit miss detection" sub-section in Job 5 for detection rules. |
+| `Create parent task` | Gmail-only signal carrying critical-language tokens that has NO matching Orbit task — Possible Orbit miss. On PM approval, Mode 2 creates a parent Orbit task on the resolved project assigned to the PM. See "Possible Orbit miss detection" sub-section in Job 5. |
 
-These are the ONLY three starting verbs a queue row's Summary may use. If the matcher cannot frame the row with one of these three, the row was misclassified — re-run the Output gating filter and either drop or downgrade.
+These five are the ONLY values that may appear in the `Recommended Action` column's verb position. If the matcher cannot frame the row with one of these five, the row was misclassified — re-run the Output gating filter and either drop or downgrade.
 
-#### Summary patterns
+#### Summary patterns — topic-style
 
-Pattern A — Create subtask:
+Pattern A — work-shaped row (`Create subtask` / `Reopen subtask` / `Hand off parent task` / `Create parent task`):
 ```
-Create subtask on <project short name> #<parent_task_id> — <proposed sub-task title>. To <assignee first name>.
-```
-
-Pattern B — Flag:
-```
-Flag <project or topic short name> — <one-clause why PM needs to look>. PM action.
+<Deliverable / scope phrase> — <client or project short name> [#<project_number>]
 ```
 
-Pattern C — Create parent task:
+Pattern B — Flag row:
 ```
-Create parent task on <project short name OR client> — <proposed parent title>. To you.
+<Topic / client signal> — <one-clause why PM needs to look>
 ```
 
-Examples:
-- `Create subtask on ECP AI Visibility Audit #110464 — Run AI Visibility audit on approved competitor list. To Hitesh.`
-- `Create subtask on Solstice WP #106447 — Swap Contact Form brochure PDF. To Atul.`
-- `Create subtask on Brother Plesk #109958 — Investigate patch ETA with WP Maintenance. To Atul.`
-- `Flag 2010 Solutions — Ellen needs dev names for 27 May call. PM action.`
-- `Flag Conversant FTP — credentials still missing, blocking dev work today. PM action.`
-- `Create parent task on Agency X — Investigate broken contact form ASAP. To you.`
-- `Create parent task on BrightPath — Draft response on missing FTP creds, client is waiting. To you.`
+Examples (note: no verb at the start — verb lives in `Recommended Action` column):
+- `Quote for Mega Menu restructure and four new pages — Process Barron change order #16915`
+- `AI Visibility audit on approved competitor list — ECP audit #16842`
+- `Contact Form brochure PDF replacement — Solstice WP #16720`
+- `Plesk patch ETA confirmation with WP Maintenance — Brother Site Issues #16631`
+- `Dev name nominations required for 27 May Joe Warner call — 2010 Solutions`
+- `Missing FTP credentials blocking development — Conversant`
+- `Contact form outage reported by client, time-critical — Agency X (Possible Orbit miss)`
 
 Rules:
-- First token is one of the three locked verbs. No other openers.
-- Project short name = client-readable phrase, max 4 words. Strip the long Orbit project title.
-- For `Create subtask`: parent task ID + the proposed sub-task title MUST appear in the summary. PM reads the title in the column without opening the row detail page.
-- For `Flag`: no Orbit task ID required; suffix `PM action` so PM knows at-a-glance there is no auto-execute.
-- For `Create parent task`: no Orbit task ID exists yet (the row creates it); the proposed parent title MUST appear in the summary and the assignee literal is `you` (PM owns the parent).
-- Use the assignee's FIRST name only in the summary (full name lives in `Recommended Assignee` column).
-- No emojis. No narrative context.
-- Max 120 chars total (Notion title field stays scannable across the column).
+- **No locked verb prefix.** Do not start with `Create subtask`, `Reopen subtask`, `Hand off parent task`, `Flag`, or `Create parent task`. Those words belong in `Recommended Action`, not here.
+- **Lead with the deliverable / scope.** Examples: `Quote for ...`, `AI Visibility audit on ...`, `Contact Form brochure PDF replacement`. The PM should be able to grasp what the work IS in the first 5–8 words.
+- **Project / client trailer.** End with ` — <short name> #<project_number>` so the PM can match rows to projects without leaving the column. Use `project_number` (the user-visible string code, e.g. `#16915`), NEVER the internal `id` field (per SKILL.md non-negotiable rule #22). Skip the `#<project_number>` suffix for Flag rows that aren't bound to a specific Orbit project, or for `Create parent task` rows where the project lookup was unambiguous but no project number was retrieved before Mode 2.
+- **Possible Orbit miss tag.** `Create parent task` rows append ` (Possible Orbit miss)` at the end of the Summary so the PM grasps the signal class at-a-glance.
+- **Professional tone.** Full English phrasing — avoid casual contractions, sentence fragments where a noun phrase reads cleaner, slang, exclamation, or hedge words ("kinda", "stuff", "thing"). The Summary reads like a one-line entry in a professional task tracker, not a colleague's quick note.
+- **No emojis. No decorative glyphs. No assignee name. No PM-action phrasing.** Assignee lives in `Recommended Assignee` column; PM action lives in `Recommended Action` column.
+- **Max 120 chars total** (Notion title field stays scannable across the column).
 
 ### Job 4b — Context cross-link (Gmail → Orbit) + Fathom enrichment fetch
 
@@ -215,25 +220,83 @@ Multiple primary signals may reference the same meeting; each gets its own `Enri
 
 **Writer impact.** `writers/notion.md` reads `context_signals[]` AND `enrichment.fathom` on each row. `context_signals[]` renders under the row's Sources H1 section per `schemas/row-detail-page.md`. `enrichment.fathom` renders under the Fathom H2 subsection of Sources (per `schemas/row-detail-page.md`), using the citation formats in `writers/source-citation.md`. Priority-lane rows see the AM-handed Orbit parent task at the top of Sources, the corroborating Gmail thread (if any) below, and the Fathom enrichment (if any) under the Fathom H2.
 
-### Job 5 — Recommend the action (2 actions only)
+### Job 5 — Recommend the action (5 locked verbs, see Job 4 table)
 
-The action set is closed and matches the Output gating section above. Pick exactly one:
+The action set is closed: `Create subtask`, `Reopen subtask`, `Hand off parent task`, `Flag`, `Create parent task`. Picked in this order:
 
-- **Create subtask** — new sub-task is created in Orbit under the **PM-owned parent task** on the project. Universal across project types (Ad-hoc and Maintenance included). Output: `parent_task_id` (with `assignee_id == PM_user_id`), `task_title` (the actual sub-task title that will appear in Orbit), `assignee_id` for the dev, full 6-section body per `schemas/orbit-dq-standard.md` in plain language. The task title is generated explicitly and shown in the row Summary so the PM does not need to open the detail page to know what is being created.
-- **Flag** — signal is recorded as a PM-attention row, no Orbit task created, no Mode 2 execution. Output: `pm_next_step` (one short clause describing the next move PM should take — e.g., "Reply to Ellen with the dev names", "Decide whether the FTP creds chase moves to client direct"), no `task_title`, no `proposed_orbit_body`, no `assignee_id`. The Status default is still `Recommended Action`; when the PM resolves the flagged item externally, they mark it `Skip. No Action Needed`.
-- **Create parent task** — Gmail-only critical-language signal that has no corroborating Orbit task. On PM approval, Mode 2 creates a parent Orbit task on the resolved project assigned to the PM. Output: `project_id`, `task_title`, `proposed_orbit_body` (full 6-section body), `assignee_id == PM_user_id`, `parent_task_id == null`. Detection rules in the "Possible Orbit miss detection" sub-section below. Executor path in `executors/orbit.md` § Executor — Create parent task.
+1. **Run Job 5a — work-type classifier.** Classify the signal into one of: `HTML_CSS | PHP_BACKEND | QA | AUDIT | QUOTE | SEO | DESIGN | CONTENT | BA | OTHER`. Job 5a output (`row.work_type`) drives both this Job 5 verb pick AND Job 6 pod-boundary routing.
+2. **Priority-lane override (still applies).** If the signal carries `signal_type: am_handed_to_pm_overnight_due_today`, the parent is pinned to `signal.parent_task_id`. Action defaults to `Create subtask` (or `Reopen subtask` after Job 5.5 check). Never `Flag`.
+3. **Flag the PM-owned moves first.** If the next move is PM-owned (reply to an AM, decide a scope question, brief the team for a meeting), choose `Flag` regardless of work_type. Examples: "Ellen needs dev names for the 27 May Joe Warner call", "FTP credentials still missing — PM decides whether to chase client directly".
+4. **Possible Orbit miss check (Gmail-only critical signals).** Before defaulting a Gmail-only signal to a workshop verb, run the "Possible Orbit miss detection" criteria below. If ALL four criteria hold AND project resolution is unambiguous, choose `Create parent task`. If criteria hold but project is ambiguous, choose `Flag` with the "auto-create skipped" `pm_next_step` per the project-uncertainty rule.
+5. **Work-type → verb branch.** For signals that are dev-shaped work (not PM-owned, not Possible Orbit miss), the verb depends on `work_type`:
 
-If none of the three actions fits, the signal does not become a row. Apply the Output gating filter and route to the `Filtered signals` log (Job 11).
+    | `work_type` | Default verb (pre Job 5.5) |
+    |---|---|
+    | `HTML_CSS`, `PHP_BACKEND`, `QA` | `Create subtask` (pod-resource path; Job 5.5 may flip to `Reopen subtask`) |
+    | `AUDIT`, `QUOTE`, `SEO`, `DESIGN`, `CONTENT`, `BA` | `Hand off parent task` (non-pod path; no subtask) |
+    | `OTHER` | `Create subtask` (fallback; Job 6 falls through to the existing 4-branch tree) |
 
-#### Choosing Create subtask vs Flag
+6. **Edge case — `Create subtask` path requires PM-owned parent.** If `Create subtask` or `Reopen subtask` was chosen but the project has NO PM-owned parent task (PM-owned parent pool empty), downgrade to `Flag` with `pm_next_step: "Seed a parent task on <project> so future sub-tasks have a home."` Same edge handling as before. (Priority-lane signals always have a pinned parent, so they never hit this edge.)
+7. **Edge case — `Hand off parent task` also requires the PM-owned parent.** If `Hand off parent task` was chosen but the PM-owned parent pool for the project is empty, downgrade to `Flag` with `pm_next_step: "Seed a parent task on <project> and hand it off manually to the <pool> lead — auto-handoff skipped because no parent exists."` Reason: handoff REASSIGNS an existing parent; it does not create one.
+8. **Run Job 5.5 — existing-subtask check.** Only for rows that landed on `Create subtask` at step 5. If an open subtask of the same `work_type` already exists under the parent, flip the verb to `Reopen subtask` (see Job 5.5 for details). `Hand off parent task` rows skip Job 5.5 — they don't create or reuse subtasks.
 
-For each signal that survives the drop list AND the PM-action detection check, decide:
+If none of the five actions fits, the signal does not become a row. Apply the Output gating filter and route to the `Filtered signals` log (Job 11).
 
-1. **Priority-lane override.** If the signal carries `signal_type: am_handed_to_pm_overnight_due_today`, it is ALWAYS `Create subtask`. Never `Flag`. The PM-owned parent pool is bypassed — the parent is pinned to `signal.parent_task_id` (the AM-assigned parent the PM is already the assignee on). Proceed to Job 6 to suggest the delegated assignee.
-2. **Is there a clear dev task to delegate?** If yes — concrete deliverable, identifiable scope, a developer can pick it up and run — choose `Create subtask`. Examples: "swap brochure PDF on Contact Form thank-you emails", "run AI Visibility audit on the approved competitor list", "investigate patch ETA for the Plesk security warning and update the due date".
-3. **Is the next move PM-owned?** If yes — reply to an AM, decide a scope question, brief the team for a meeting, pick which devs attend a call — choose `Flag`. Examples: "Ellen needs dev names for the 27 May Joe Warner call", "FTP credentials still missing — PM decides whether to chase client directly".
-4. **Edge case — Create subtask path requires PM-owned parent.** If `Create subtask` was chosen but the project has NO PM-owned parent task (PM-owned parent pool empty), downgrade to `Flag`. The flag's `pm_next_step` becomes: "Seed a parent task on <project> so future sub-tasks have a home." Do NOT drop the signal; the PM should know they need to create the parent. (This edge case never applies to priority-lane signals — they always have a pinned parent.)
-5. **Possible Orbit miss check (Gmail-only critical signals).** Before defaulting a Gmail-only signal to `Flag`, run the "Possible Orbit miss detection" criteria in the sub-section below. If ALL four criteria hold AND project resolution is unambiguous, choose `Create parent task` instead of `Flag`. If criteria hold but project is ambiguous, choose `Flag` with the "auto-create skipped" `pm_next_step` per the project-uncertainty rule.
+### Job 5a — Work-type classifier
+
+Runs immediately after parent-task selection (when known) and before Job 5 verb-branch. Inputs: signal content (Gmail subject + body OR Orbit comment text OR new-task title), originating Orbit task title + description (from the Job 7 deep-read when available; otherwise from the workload snapshot), and any AI Notes from Job 4b cross-link.
+
+Classifies to exactly one `work_type` token (greedy first-match in declaration order — earlier rules win when multiple fire):
+
+| `work_type` | Token / keyword cues (case-insensitive substring match) |
+|---|---|
+| `AUDIT` | `audit`, `seo audit`, `ai audit`, `aeo audit`, `geo audit`, `ada audit`, `accessibility audit`, `visibility audit`, `performance audit` (audit beats SEO when both fire — Audit work routes to the same pool but is the more specific class) |
+| `QUOTE` | `quote`, `quoting`, `estimate hours`, `quoted hours`, `cost estimation`, `change order`, `scope estimation`, `pricing` |
+| `SEO` | `seo`, `keyword research`, `meta tags`, `meta descriptions`, `serp`, `backlinks`, `schema markup`, `sitemap` (when not audit-prefixed) |
+| `DESIGN` | `figma`, `mockup`, `wireframe`, `design`, `visual`, `ui design`, `branding`, `logo`, `creative`, `style guide` |
+| `CONTENT` | `copy`, `blog post`, `content writing`, `landing page copy`, `case study`, `whitepaper`, `email copy` |
+| `BA` | `requirements gathering`, `scoping`, `business analysis`, `discovery doc`, `ba review`, `flow diagram` |
+| `HTML_CSS` | `html`, `css`, `frontend`, `front-end`, `responsive`, `breakpoints`, `mega menu`, `hero image`, `navigation`, `landing page` (UI work without server logic), `markup`, `theme styling` |
+| `PHP_BACKEND` | `php`, `backend`, `back-end`, `api`, `database`, `mysql`, `wordpress plugin`, `custom post type`, `acf field`, `server-side`, `data import`, `migration script`, `ssl`, `dns` (when paired with code work) |
+| `QA` | `qa`, `testing`, `regression`, `bug`, `test case`, `verify`, `cross-browser test`, `device matrix`, `release checklist` |
+| `OTHER` | none of the above fire |
+
+Conflict resolution:
+
+- Multiple cues from different work_types in the same signal — pick the work_type whose cue is closest to the verb / deliverable in the signal text (e.g. "audit the SEO landing page — also fix the broken hero image" → `AUDIT` wins because the verb "audit" attaches to the primary ask, even though "hero image" would have fired `HTML_CSS`).
+- Mega-menu / page-structure work that touches BOTH front-end and back-end → default to `HTML_CSS` when the deliverable is the page structure / styling; `PHP_BACKEND` only when the deliverable is server-side logic (e.g. custom WP plugin, database hook). When genuinely ambiguous, surface `Uncertain:` in AI Notes and pick the more conservative classifier (`HTML_CSS` over `PHP_BACKEND` — frontend pod is the broader pool).
+- The Mega Menu restructure + 4 new pages example from the user's screenshot classifies as `HTML_CSS` (page structure work), NOT `PHP_BACKEND` — the deliverable is markup + content + navigation, not server logic. The Quote on that same parent is `QUOTE` (separate row, separate verb path).
+
+Output: `row.work_type` token. Always populated (never null — `OTHER` is the fallback).
+
+### Job 5.5 — Existing-subtask check (idempotency for HTML_CSS / PHP_BACKEND / QA)
+
+Runs only for rows that landed on `Create subtask` after Job 5 step 5. Skipped for `Hand off parent task`, `Flag`, `Create parent task`, and `Reopen subtask` rows (the last is the output of THIS job).
+
+For each `Create subtask` survivor:
+
+1. **Fetch parent's subtasks.** Read `parent.subtasks[]` from the Orbit MCP `get_task_details(parent_task_id)` response — this call is already part of the Job 7 mandatory deep-read (see `collectors/orbit.md` § Per-row deep-read), so no extra MCP call fires here; Job 5.5 consumes the cached response. Each entry in `subtasks[]` carries `id`, `title`, `assignee_id`, `assignee`, `status`, `is_completed`.
+2. **Filter to open subtasks.** Drop entries where `is_completed == 1` OR `status ∈ { "Done", "Archive", "Closed" }`. Remaining set is candidate-for-reuse.
+3. **Match by work_type.** For each candidate, re-run Job 5a on its `title` + (if available) description text to get the candidate's own work_type token. Keep candidates whose work_type matches `row.work_type`.
+4. **Apply the match-strictness rule (work-type only).** Per locked decision, a work_type match is sufficient — no secondary keyword overlap required. If `row.work_type` is `OTHER`, no reuse is attempted (`OTHER` is too vague to dedupe).
+5. **Branch on match count:**
+    - **Zero matches:** stay at `Create subtask`. No change.
+    - **Exactly one match:** flip to `Reopen subtask`. Set:
+        - `row.existing_subtask_id` = matched subtask's `id`
+        - `row.existing_subtask_title` = matched subtask's `title`
+        - `row.last_dev_user_id` = last non-PM commenter on the matched subtask (see step 6).
+        - `row.new_work_description` = matcher's plain-language summary of what the new signal adds (one short paragraph; this becomes the body of the comment Mode 2 will post).
+    - **Multiple matches:** keep `Create subtask` and emit AI Note `Uncertain: parent #<parent_task_id> already has <N> open subtasks matching work_type <work_type> (#<id1>, #<id2>, ...). Please pick which to reopen or confirm a new subtask is intended.`
+6. **Last-dev extraction.** From the matched subtask's `list_task_comments` (also cached from Job 7 deep-read), find the most recent comment whose `user_id != PM_user_id`. That commenter is `last_dev_user_id`. Fallback chain when no qualifying comment exists:
+    - The subtask's current `assignee_id` if not PM.
+    - The subtask's `created_by_id` if not PM.
+    - If both fall back to PM (rare — pure PM-authored subtask history), emit AI Note `Uncertain: existing subtask #<id> has no non-PM activity history. Please pick the assignee.` and keep `Create subtask` (do not flip — there is no "last dev" to reassign to).
+7. **Last-dev active check.** Look up `last_dev_user_id` in the `list_users` cache. If the user's `is_active == false` (or equivalent inactive flag), emit AI Note `Uncertain: last dev on existing subtask #<id> was <name> but they're no longer active in Orbit. Please pick a new assignee.` Keep verb at `Reopen subtask` but set `row.last_dev_user_id = null` — the executor will halt and surface the row for manual reassignment instead of auto-firing `update_task`.
+
+Output deltas:
+
+- `row.verb` may flip from `Create subtask` to `Reopen subtask`.
+- New fields: `row.existing_subtask_id`, `row.existing_subtask_title`, `row.last_dev_user_id`, `row.new_work_description`.
 
 #### Possible Orbit miss detection (Create parent task path)
 
@@ -293,32 +356,36 @@ After `parent_task_id` is resolved (priority-lane pin OR PM-owned parent inferen
   - **`Flag` rows**: if the flag is anchored to a specific Orbit task (e.g., `signal.task_id` present, no PM-action on the task), set `orbit_task_link = signal.task_url`. If the flag has no underlying Orbit task (Gmail-only signal, no project task created yet), set `orbit_task_link = "—"` (em-dash literal). Never null — writer expects the field.
   - **`Create parent task` rows**: no Orbit task exists at row-create time (the parent will be created by Mode 2). Set `orbit_task_link = "—"`. After Mode 2 executes, the created parent's URL lands in `Outcome` only — `orbit_task_link` stays frozen at em-dash to indicate "this row created the task; see Outcome for the URL".
   - **Null `task_url` on a signal**: cross-check the Orbit collector's relationship map (every task in the universe is indexed by `task_id` with its URL). If the URL is still missing there, set `orbit_task_link = "—"` and append an AI Note: `Orbit task URL not surfaced by MCP on this signal — open via task ID #<id>.` Do not block the row.
-- **`project`** — render-ready string for the Notion `Project` column. Format: `<project_title> (#<project_id>)`. For Maintenance / Ad-hoc projects, append `— Maintenance` / `— Ad-hoc` (read project_type from the Orbit relationship map). For rows with no resolved Orbit project (Gmail-only flag with no project mapping), emit `Standalone`. Preserve the raw `project_name` and `orbit_project_id` separately for downstream consumers.
+- **`project`** — render-ready string for the Notion `Project` column. Format: `<project_title> (#<project_number>)` where `project_number` is the user-visible Orbit project code (string field from `get_project_details.project_number`, e.g. `"16915"`), NEVER the internal `id` field (per SKILL.md non-negotiable rule #22). For Maintenance / Ad-hoc projects, append `— Maintenance` / `— Ad-hoc` (read project_type from the Orbit relationship map). For rows with no resolved Orbit project (Gmail-only flag with no project mapping), emit `Standalone`. Preserve `project_name`, `project_number` (user-visible string), and `orbit_project_id` (internal int — used only inside URLs and the relationship map) separately for downstream consumers.
 
 No Mode 2 step writes into `orbit_task_link` later — the column is frozen at row-create time and stays as the parent reference. Sub-task URLs (created by Mode 2) go into `Outcome` only, per `executors/orbit.md` Outcome format.
 
 ### Job 6 — Recommend the assignee
 
-**Short-circuit for Create parent task rows.** Job 5 already set `assignee_id = PM_user_id` for these rows (the parent is the PM's coordination anchor). Skip pod-inference entirely. Render `recommended_assignee` as `You (PM)` with reason `Parent task assigned to you so you can spawn sub-tasks in later runs.` No availability check, no candidate pool, no Job-6 decision tree.
+**Short-circuit for `Create parent task` rows.** Job 5 already set `assignee_id = PM_user_id` for these rows (the parent is the PM's coordination anchor). Skip pod-inference entirely. Render `recommended_assignee` as `You (PM)` with reason `Parent task assigned to you so you can spawn sub-tasks in later runs.` No availability check, no candidate pool, no Job-6 decision tree.
 
-For all other rows (Create subtask, Flag), continue:
+**Short-circuit for `Reopen subtask` rows.** Job 5.5 already resolved `row.last_dev_user_id`. Skip pod-inference. Render `recommended_assignee` as `<last_dev name> (<role>) — back on the existing subtask #<existing_subtask_id> they last worked.` If `last_dev_user_id` is null (Job 5.5 flagged inactive-dev or no-non-PM-history edge cases), render `— (please pick — see AI Notes)` and let the PM resolve.
+
+**Pod leader routing for `Hand off parent task` rows.** Job 5a's `work_type` (`AUDIT | QUOTE | SEO | DESIGN | CONTENT | BA`) maps to a functional pool (table below). Read the pool from `pod-inference.md` output's `functional_pools[<pool>]` and pick the named lead per the pool's first row (or fall back to the highest-familiarity member when no explicit lead row is tagged). Render `recommended_assignee` as `<leader name> (<pool> lead) — handoff target for <work_type> work.` If the functional_pool is empty (matrix unavailable, or pool truly empty), drop `Uncertain:` AI Note and surface candidates from the broader functional_pools for PM pick.
+
+For all other rows (`Create subtask`, `Flag`), continue with the 4-branch decision tree below.
 
 Call `synthesis/pod-inference.md` with the item's project ID. It returns the candidate pool — matrix members ∪ Orbit followers/recent-assignees — with role hints, familiarity scores, `has_history_on_project` booleans, matrix membership flags, plus the `floater_pool` and `functional_pools` for fallback paths.
 
 Pick the single best assignee using a 4-branch decision tree. Familiarity wins by default; availability is checked only on the no-history fallback path (per `SKILL.md` non-negotiable rule #6).
 
-#### Role-fit heuristics
+#### Work-type → pod-boundary mapping (replaces the old loose role-fit heuristic)
 
-Filter the candidate list by role first, using the task's domain:
+The candidate filter for `Create subtask` rows is driven by `row.work_type` (Job 5a output), NOT by keyword scan over the task title. Strict per-pod boundaries:
 
-- FE / HTML / front-end / homepage → role `FE` (matrix label `HTML`)
-- WordPress / WP / PHP / theme / plugin → role `WP` (matrix label `WordPress / PHP`)
-- BE / API / database / server-side → role `BE` (no matrix label — Orbit-history only)
-- QA / testing / regression → role `QA`
-- Design / mockup / Figma → role `Design`
-- Content / copy / blog → role `Content`
-- Business analysis / requirements / scoping → role `BA`
-- Project coordination / AM-liaison → suggest the PM themselves (existing behavior)
+| `row.work_type` | Eligible candidate roles | Notes |
+|---|---|---|
+| `HTML_CSS` | `FE` only (matrix `HTML` row + Floater HTML role) | Never WP/PHP. HTML/CSS work is FE pod's exclusive territory. |
+| `PHP_BACKEND` | `WP` (matrix `WordPress / PHP`) + Orbit-history `BE` | Backend / PHP logic only. Audits are NOT routed here — they go to AUDIT pool via the `Hand off parent task` verb. |
+| `QA` | `QA` matrix | |
+| `OTHER` | falls back to keyword heuristic (legacy 4-branch) | Used only when Job 5a couldn't classify; treats every role as eligible. |
+
+`AUDIT`, `QUOTE`, `SEO`, `DESIGN`, `CONTENT`, `BA` never reach this filter — Job 5 sent them down the `Hand off parent task` path which uses the functional-pool-leader routing above.
 
 Apply matrix `role_hint` first (strongest signal); fall back to Orbit `department` and task history when the candidate has `source: orbit-history` (no matrix hint).
 
@@ -436,9 +503,30 @@ This rule applies to **priority-lane rows especially**: an AM-handed parent task
 
 **Create subtask path** — pre-write the full 6-section task body per `schemas/orbit-dq-standard.md`, applying the mandatory enrichment above. Plain language (4th–5th grade English) per `writers/plain-language.md` since the delivery team reads it. Keep role-specific technical terms. Strip corporate English. The 6-section body lands in Orbit as the sub-task description when Mode 2 fires.
 
+**Reopen subtask path** — does NOT pre-write a new 6-section body (the existing subtask already has one). Instead, compose `row.new_work_description` as a plain-language comment that will be posted on the existing subtask by Mode 2: 2–4 sentences naming what the new signal adds (new scope, new constraint, new client feedback, new deadline) plus the source citation (originating Gmail thread URL or Orbit comment URL). Header line `Reopened — new work from <signal date>:`. Body inherits the same plain-language enforcement as the team handoff draft.
+
+**Hand off parent task path** — does NOT pre-write a new task body either; the existing parent already has one. Compose `row.new_work_description` as a brief paragraph the PM forwards to the pool leader explaining what's being handed off (the scope summary + the relevant client / AM context + the parent task URL). This text lives in the row's `Proposed Handoff` section. The executor's Orbit write is reassignment only — no new task body, no new comment by default (though the executor MAY post a brief "@<leader> handed to you per PM's morning queue" comment for audit trail — see `executors/orbit.md` Hand off path).
+
 **Create parent task path** — pre-write the full 6-section task body per `schemas/orbit-dq-standard.md`. Same plain-language rules and same mandatory email-enrichment rules as Create subtask. The body cites the originating Gmail signal explicitly in the REFS section (sender, subject, thread URL) so the audit trail is clear when the PM (or someone reviewing later) opens the Orbit task. The originating Gmail thread for a Possible-Orbit-miss row IS the primary source — read its full depth.
 
 **Flag path** — does NOT carry a `proposed_orbit_body`. No Orbit write happens for a Flag row. Job 7 is skipped for Flag rows entirely. The row's detail page substitutes `Proposed Orbit Task Body` with `PM next step` (rendered from the `pm_next_step` clause set in Job 5). However, the row detail Sources section still renders all attached `context_signals[]` and `enrichment.fathom` so the PM can scan the email/meeting context while deciding their next move.
+
+### Job 7b — Compose the row's Task Brief
+
+Every row in the queue — regardless of verb — carries a `task_brief` field that renders below the H1 Summary heading on the row detail page (above the H1 Sources heading, per `schemas/row-detail-page.md`). The brief is a 2–4 sentence narrative answering two questions: (a) what is this work about, (b) what's the new update / latest signal that triggered this row.
+
+Composition rules:
+
+- **Pull from the most recent input source first.** For Orbit-priority signals, that's the AM clarification / handoff context (from the parent task's `parent_task_body` and the most recent activity_log entry). For Gmail-driven signals, that's the most recent message in the thread. For `Reopen subtask` rows, that's the new signal that triggered the reopen (NOT the old subtask description — that lives in the existing Orbit body already).
+- **Surface deltas, not all-time context.** The brief is for the PM to grasp what's NEW. The deeper history (prior comments, older email messages, full Fathom transcript) lives in the 6-section Orbit body (`Create subtask` / `Create parent task` paths) and the Sources block (every row). The brief stays tight.
+- **Plain professional English.** The PM reads this — not the delivery team. No simplification pass needed.
+- **Anchor on the deliverable when possible.** Lead with one sentence describing what the work IS (mirrors the Summary topic), then 1–3 sentences with the new signal's content.
+- **Cite the trigger inline.** When a specific message / comment is the trigger, identify it briefly (e.g. "Pravin commented on the parent at 12:40 IST today, confirming the 4 new pages should mirror the existing parent/child pattern.").
+- **For `Flag` rows:** the brief becomes a 2–3 sentence "here's what came in" summary of the signal the PM needs to react to.
+- **For `Hand off parent task` rows:** the brief explains why this work is being handed off to the pool leader rather than kept in-pod (e.g. "This is a quote / SEO audit / design ask — handed to the Quoting / Marketing-SEO / Design pool lead per the work-type routing rules.").
+- **Length cap: 600 chars.** Notion truncates aggressively in row preview; the brief is a quick read on the detail page, not a placeholder for the Orbit body.
+
+The writer (`writers/notion.md`) renders `task_brief` as a paragraph under the H1 `Task Brief` heading.
 
 ### Job 8 — Generate the proposed handoff
 
@@ -458,7 +546,7 @@ NO handoff is generated for AMs or clients — those are PM-handled outside the 
 
 ### Job 9 — Generate the proposed email
 
-**Skipped.** Email drafting is outside the queue's scope under the 2-action gating rule. Client and AM emails are PM-handled in Gmail directly. No row produces an email artifact.
+**Skipped.** Email drafting is outside the queue's scope under the 5-verb gating rule. Client and AM emails are PM-handled in Gmail directly. No row produces an email artifact.
 
 If a signal's primary value was an email reply, the matcher Filtered-signals-logs it and moves on.
 

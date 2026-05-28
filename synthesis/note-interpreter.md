@@ -140,7 +140,8 @@ In those cases, set `confidence = low` and populate `clarification_needed` with 
 ### Example 1 — assignee override on a sub-task
 
 **Input:**
-- Row: `Create subtask on Solstice WP #106447 — Swap Contact Form brochure PDF. To Atul.`
+- Row Summary (topic-style): `Swap Contact Form brochure PDF — Solstice WP #16720`
+- Row Recommended Action: `Create subtask under #106447, assign to Atul (WP) + handoff draft`
 - PM Note: `assign to Ravi instead, he knows their codebase from Phase 1`
 
 **Output:**

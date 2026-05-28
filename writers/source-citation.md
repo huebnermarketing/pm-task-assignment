@@ -44,6 +44,8 @@ Orbit task #105892 — [task title]
 URL: https://app.whitelabeliq.com/93640173/project/.../105892
 ```
 
+When the task's parent project is referenced inline (in `Project:` lines, project names, Slack drafts, handoff drafts), use the project's user-visible code from Orbit's `get_project_details.project_number` field — NEVER the internal `id` field, NEVER the URL slug. Format: `<Project Name> (#<project_number>)`. Per SKILL.md non-negotiable rule #22. Example: `Process Barron Change Order (#16915)` — NOT `(#8598)` (that's the internal `id`), and NOT `(#51083298598)` (that's the URL slug).
+
 For a comment — paste the exact quote:
 ```
 Orbit comment by [Author] on [Date]:

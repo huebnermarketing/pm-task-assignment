@@ -71,49 +71,60 @@ Content order:
 4. **Inline Morning Queue database**
    - Create via `notion-create-database` with the parent as this dated page.
    - Schema per `schemas/morning-queue-database.md` — 10 columns, all visible in the default view, in order: Summary, AI Notes, Orbit Task Link, Project, Recommended Action, Recommended Assignee, Outcome, PM Notes, Source Systems, Status.
-   - `Orbit Task Link` is Notion's native URL property — single clickable URL per row. For `Create subtask` rows it holds the parent task's Orbit URL; for `Flag` rows it holds the bound Orbit task URL, or `—` / empty when no Orbit task is bound (e.g., Gmail-only flag). The sub-task URL that Mode 2 creates is written into `Outcome` only — never into `Orbit Task Link` (which keeps the parent reference stable through the row's lifetime).
-   - `Project` format is `<Project Name> (#<orbit_project_id>)` — matcher supplies both name and Orbit project code. Maintenance / Ad-hoc style projects append a type suffix (`— Maintenance`).
+   - `Orbit Task Link` is Notion's native URL property — single clickable URL per row. For `Create subtask` / `Reopen subtask` / `Hand off parent task` rows it holds the parent task's Orbit URL; for `Flag` rows it holds the bound Orbit task URL, or `—` / empty when no Orbit task is bound (e.g., Gmail-only flag); for `Create parent task` rows it holds `—` (the parent doesn't exist yet). The sub-task URL that Mode 2 creates is written into `Outcome` only — never into `Orbit Task Link` (which keeps the parent reference stable through the row's lifetime).
+   - `Project` format is `<Project Name> (#<project_number>)` — matcher supplies both name and Orbit user-visible project code from `get_project_details.project_number` (NEVER the internal `id` field, per SKILL.md non-negotiable #22). Maintenance / Ad-hoc style projects append a type suffix (`— Maintenance`).
 
 ### Step 5.5 — Enforce output gating (defense in depth)
 
-Before iterating over the matcher's output array, scan it once and verify every item conforms to the 2-action rule from `synthesis/matcher.md` Output gating:
+Before iterating over the matcher's output array, scan it once and verify every item conforms to the 5-verb rule from `synthesis/matcher.md` Output gating + Job 4. The `summary` field is topic-style (NOT verb-prefixed per the rolled-back rule); the verb lock applies to `recommended_action` only.
 
-- Every item's `summary` must start with `Create subtask on` or `Flag `. No other openers.
-- `Create subtask` items MUST carry `parent_task_id`, `task_title`, `assignee_id`, and `proposed_orbit_body`. Missing any of these = malformed.
-- `Flag` items MUST carry `pm_next_step`. They MUST NOT carry `parent_task_id`, `task_title`, `assignee_id`, or `proposed_orbit_body`.
-- Items with `recommended_assignee = —` AND row action is `Create subtask` are malformed (subtask always has an assignee or an `Uncertain:` AI Note explaining why).
+Per-verb required fields (the writer rejects malformed rows by moving them to `filtered_signals`, NOT by trying to repair them):
+
+- **`Create subtask`** — MUST carry `parent_task_id`, `task_title`, `assignee_id`, `proposed_orbit_body`, `work_type`. Recommended assignee may be `—` only when an `Uncertain:` AI Note explains why.
+- **`Reopen subtask`** — MUST carry `parent_task_id`, `existing_subtask_id`, `existing_subtask_title`, `new_work_description`, `work_type`. May carry `last_dev_user_id` (or null when Job 5.5 flagged inactive-dev edge — in which case AI Notes carries the `Uncertain:`).
+- **`Hand off parent task`** — MUST carry `parent_task_id`, `recommended_assignee_user_id` (the pool leader), `work_type` (which must be in `{AUDIT, QUOTE, SEO, DESIGN, CONTENT, BA}`). MUST NOT carry `task_title` or `proposed_orbit_body`.
+- **`Flag`** — MUST carry `pm_next_step`. MUST NOT carry `parent_task_id`, `task_title`, `assignee_id`, or `proposed_orbit_body`.
+- **`Create parent task`** — MUST carry `project_id`, `task_title`, `proposed_orbit_body`, `assignee_id == PM_user_id`, `parent_task_id == null`.
+
+Cross-row consistency checks:
+- Every item's `recommended_action` text must start with one of the five locked verbs.
+- Every item must carry a `task_brief` (Job 7b output), non-null, ≤ 600 chars.
+- Every item's `project` field (if not `Standalone`) must render as `<name> (#<project_number>)` where `project_number` is the string Orbit user-visible code, not the integer `id`.
 
 Any item failing these checks is moved from the items array to the `filtered_signals` array with `filter_reason: writer_gating_caught_drift` before row creation. Log to Run Log. This is a safety net; the matcher should have already prevented these — but if it didn't, the writer catches the drift rather than polluting the queue.
 
 ### Step 5.6 — Render the row-detail Action Block
 
-For each item that survives Step 5.5, the writer renders the row's detail page with the Action Block callout at the very top (per `schemas/row-detail-page.md`). The callout uses the structural emoji 🎯 (Create subtask) or 🚩 (Flag) — these are on the writer-emoji allowlist per `writers/plain-language.md`. The action callout appears BEFORE the H1 Summary. The PM should not have to scroll past Sources or Recommended Action to find the proposed task title and assignee — that information is in the top callout.
+For each item that survives Step 5.5, the writer renders the row's detail page with the Action Block callout at the very top (per `schemas/row-detail-page.md`). The callout is plain text — no emoji, no decorative glyphs. The verb word (`Create subtask`, `Reopen subtask`, `Hand off parent task`, `Flag for PM`, `Create parent task`) opens the first line in bold; subsequent lines carry structured fields. The action callout appears BEFORE the H1 Summary. The PM should not have to scroll past Sources or Recommended Action to find the proposed task title and assignee — that information is in the top callout.
 
 ### Step 6 — Populate each row
 
 For each item in the matcher's output array (after Step 5.5 gating):
 
 1. Create a row in the database with (in schema DDL order — Summary, AI Notes, Orbit Task Link, Project, Recommended Action, Recommended Assignee, Outcome, PM Notes, Source Systems, Status):
-   - `Summary` (title) — matcher's verb-first one-liner
-   - `AI Notes` — any uncertainty flags, split reasoning, or matcher Job 6 delegate reasoning; for priority-lane rows always populated with `<AM> put this on your plate overnight, due today. Proposed delegate: <name> (<reason>).`; empty otherwise
-   - `Orbit Task Link` (URL property) — parent task URL for `Create subtask` rows; bound task URL for `Flag` rows that have one; `—` or empty for Flag rows with no Orbit task
-   - `Project` — `<name> (#<orbit_project_id>)` or `Standalone`
-   - `Recommended Action` — short phrase
+   - `Summary` (title) — matcher's topic-style one-liner (NOT verb-prefixed; verb lives in `Recommended Action` only)
+   - `AI Notes` — any uncertainty flags, split reasoning, matcher Job 6 delegate reasoning, or Job 5.5 last-dev edge cases; for priority-lane rows always populated with `<AM> put this on your plate overnight, due today. Proposed delegate: <name> (<reason>).`; empty otherwise
+   - `Orbit Task Link` (URL property) — parent task URL for `Create subtask` / `Reopen subtask` / `Hand off parent task` rows; bound task URL for `Flag` rows that have one; `—` or empty for Flag rows with no Orbit task and for `Create parent task` rows
+   - `Project` — `<name> (#<project_number>)` (user-visible string code, not internal `id` per SKILL.md #22) or `Standalone`
+   - `Recommended Action` — short phrase starting with one of the five locked verbs (`Create subtask`, `Reopen subtask`, `Hand off parent task`, `Flag`, `Create parent task`)
    - `Recommended Assignee` — name + role + short reason; `—` for advisory items
-   - `Outcome` — empty (filled by Mode 2; Mode 2 writes the new sub-task URL here, NOT into Orbit Task Link)
+   - `Outcome` — empty (filled by Mode 2; Mode 2 writes new sub-task URL or reassignment confirmation here, NOT into Orbit Task Link)
    - `PM Notes` — empty
    - `Source Systems` — multi-select of which sources contributed (Orbit, Gmail — primary; Fathom only if matcher Job 4b Pass 2 fetched enrichment for this row)
    - `Status` = `Recommended Action` (default)
 
-2. Populate the row's page content per `schemas/row-detail-page.md`:
-   - `Summary` heading + the matcher's summary
+2. Populate the row's page content per `schemas/row-detail-page.md` (block order is load-bearing — see schema):
+   - Top callout — Action Block (no heading) — per the 5 verb variants in `schemas/row-detail-page.md` Top callout section.
+   - `Summary` heading + matcher's topic-style summary
+   - **`Task Brief` heading + matcher's `row.task_brief` paragraph (Job 7b output)** — placed BETWEEN Summary and Sources so the PM reads what the work is + what's new before scanning citations
    - `Sources` heading + full citations per `writers/source-citation.md`. Two cases:
      - **Job 4b Pass 1 (Gmail → Orbit cross-link).** When `context_signals[]` is populated on this row, render each linked Gmail signal as an H2 subsection under Sources. High-confidence cross-links go under the primary Sources list; weak cross-links (match_strength="weak") go under an H2 `Possible context` subsection.
      - **Job 4b Pass 2 (Fathom enrichment).** When `enrichment.fathom` is populated on this row (the matcher fetched a meeting context from `collectors/fathom.md`), render it under an H2 `Fathom enrichment` subsection per `schemas/row-detail-page.md`. Include the trigger phrase that caused the fetch, the scoped summary excerpt, relevant action items, attendees, and the recording link. Skip this subsection entirely if `enrichment.fathom` is null.
-   - `Recommended Action` heading + reasoning
-   - `Proposed Orbit Task Body` heading + 6-section body in plain language
-   - `Proposed Handoff` heading + plain-language message
-   - `Proposed Email` heading + email draft (if applicable)
+   - `Recommended Action` heading + reasoning (assignee-pick logic for Create/Reopen, work_type → pool routing for Hand off, signal-weighing for Flag)
+   - `Proposed Orbit Task Body` heading + 6-section body (Create subtask + Create parent task only)
+   - `Proposed New-Work Comment` heading + matcher's `new_work_description` (Reopen subtask only)
+   - `PM Next Step` heading + paragraph (Flag only)
+   - `Proposed Handoff` heading + plain-language message (Create subtask / Reopen subtask / Hand off parent task)
    - `AI Notes` heading (if any notes). For priority-lane rows, AI Notes carries the matcher's `<AM> put this on your plate overnight, due today. Proposed delegate: <name> (<reason>).` line.
    - Bottom toggle: `Reference Context for the Skill — working memory, not for review`, containing the full raw signals and pod inference reasoning
 

@@ -228,7 +228,9 @@ Structure:
   },
   "projects": [
     {
-      "id": <int>,
+      "id": <int — internal Orbit PK (NEVER user-facing per SKILL.md non-negotiable #22). Used only inside URLs and for MCP calls.>,
+      "project_number": <string — user-visible Orbit project code (e.g. "16915"). Source: `get_project_details.project_number` or `list_projects.project_number`. THIS is the value rendered in Notion / Slack / handoff drafts as `#<project_number>`.>,
+      "url_slug": <string — URL-encoded id (e.g. "51083298598"). Used by `url` field; NEVER user-facing as a project reference.>,
       "title": <string>,
       "url": <string>,
       "project_type": <string — "Fixed Cost" | "SaaS" | "PPC" | "Hosting" | "Hourly" | "Repeat" | "Ad-hoc" | "Maintenance" | ...>,
@@ -261,6 +263,8 @@ Structure:
 ```
 
 The relationship map is now **derived from `get_user_workload(PM)` response**, not from per-project iteration. Each task in the workload carries its project info (project_id, title, client, sub-client, AM, owner, followers, project_type). The collector deduplicates the workload's per-task project info into project-level entries for this map.
+
+**`project_number` enrichment.** The `get_user_workload` response may or may not surface `project_number` per task — if it's absent and a downstream consumer (matcher Job 5, writer) needs to render the user-visible project code, the collector lazily fires `get_project_details(project_id)` once per unique project_id in the workload (cap one call per project, cache for the run). The retrieved `project_number` is folded into the relationship map entry. This is a one-time per-Mode-1-run cost (typically 5–15 project_ids per PM workload), not a per-task cost. The mandatory `get_user_workload(PM)` + `get_activity_log` calls stay unchanged.
 
 The `tasks` array is populated from the workload response directly — every open task assigned to the PM appears here with `is_pm_owned = true` (by definition, since workload only returns PM-assigned tasks). For projects where workload returned multiple tasks, all of them appear in the array; the project entry consolidates them.
 

@@ -6,7 +6,7 @@ Each row in the Morning Queue database opens to its own page. This file defines 
 
 **Primary content uses HEADINGS (always visible), not toggles.** The PM should be able to scroll the row page top-to-bottom and see everything important without clicking anything.
 
-**The top of the page is action-first, not narrative-first.** When the PM opens a row, the FIRST thing they see is what AI proposes to do (task title + assignee for Create subtask, or the PM-next-step for Flag). Sources and context move below. The PM should not have to scroll to find the actionable proposal.
+**The top of the page is action-first, then brief-first, then sources.** When the PM opens a row, the FIRST thing they see is what AI proposes to do (top callout: task title + assignee for Create subtask / Reopen subtask, pod leader for Hand off parent task, PM-next-step for Flag, proposed parent title for Create parent task). Directly below the H1 Summary heading sits the H1 **Task Brief** — a 2–4 sentence description of what the work is about + the new update / latest signal text that triggered this row. H1 **Sources** sits BELOW the brief, not directly under Summary. The PM should not have to scroll past Sources to find the actionable proposal OR the new context.
 
 **ONE toggle appears at the very bottom** for the skill's working-memory reference context, clearly labeled so the PM knows they don't need to read it.
 
@@ -14,46 +14,58 @@ Each row in the Morning Queue database opens to its own page. This file defines 
 
 ### Top callout — Action Block (ALWAYS first, NO heading above it)
 
-A single Notion `callout` block at the very top of the page. Content depends on the row's action:
+A single Notion `callout` block at the very top of the page. Plain text only — no emojis, no decorative glyphs. The first line names the action verb in bold; subsequent lines carry the structured fields. Content depends on the row's verb (one of the five locked verbs from `synthesis/matcher.md` Job 4):
 
 **Create subtask:**
 ```
-🎯 Create subtask: <proposed task_title>
+Create subtask: <proposed task_title>
 Parent: <project short name> #<parent_task_id> (link)
 Assignee: <full name> (<role>)
 Why this assignee: <one-line reason from Job 6>
 ```
 
+**Reopen subtask:**
+```
+Reopen subtask: <existing subtask title> (#<existing_subtask_id>)
+Parent: <project short name> #<parent_task_id> (link)
+Reassign to: <last dev full name> (<role>) — last non-PM activity on this subtask
+What's new: <one-line summary of new_work_description>
+```
+
+**Hand off parent task:**
+```
+Hand off parent task: <parent task title> (#<parent_task_id>)
+Reassign to: <pod leader full name> (<pool> lead)
+work_type: <work_type token> — non-pod work, no subtask created
+PM stays as: follower (audit only)
+```
+
 **Flag:**
 ```
-🚩 Flag for PM: <one-line topic>
+Flag for PM: <one-line topic>
 PM next step: <pm_next_step clause from Job 5>
 No Orbit auto-execute on this row.
 ```
 
-The 🎯 / 🚩 glyphs are part of the structural emoji allowlist for row callouts (see `writers/plain-language.md` emoji policy). They mark row type at a glance when the PM opens the page.
+**Create parent task:**
+```
+Create parent task: <proposed parent title>
+Project: <project short name> (#<project_number>)
+Assignee: You (PM)
+Note: Possible Orbit miss — no corroborating Orbit task found
+```
+
+Notion's `callout` block type carries its own optional icon — leave the icon slot empty or use Notion's default. The verb word at the start of the first line is the sole indicator of row type; PMs scan the bold text, not an icon.
 
 ### H1: Summary
 
-The narrative one-liner that matches the `Summary` column exactly. Below the action callout so the PM has already seen the actionable proposal.
+The topic-style one-liner that matches the `Summary` column exactly. Below the action callout so the PM has already seen the actionable proposal.
 
-Then a short paragraph with additional context if the summary alone isn't enough. Normal English.
+### H1: Task Brief
 
-### H1: Proposed Orbit Task Body (Create subtask rows ONLY)
+A 2–4 sentence paragraph describing what the work is about + the new update / latest signal that triggered this row. Composed by matcher Job 7b. Pulls primarily from the most recent input source (top of email thread, latest Orbit comment, AM clarification) — not from the older parent-task description. The full Orbit task body / older context still lives in the 6-section Orbit body (further down on this page for Create subtask / Create parent task rows) and the Sources block (every row).
 
-The full 6-section body that lands in Orbit when Mode 2 executes. Moved UP — sits before Sources so the PM sees the brief before context citations.
-
-Format per `schemas/orbit-dq-standard.md`, plain language per `writers/plain-language.md`.
-
-For Flag rows, this section is replaced by:
-
-### H1: PM Next Step (Flag rows ONLY)
-
-A short paragraph expanding the `pm_next_step` clause. What the PM should do, why, and any helper context (e.g., "Reply to Ellen on the Joe Warner thread; suggested devs given Joe framed the call as technical: <names from Orbit followers on #6994>"). Normal English.
-
-### H1: Proposed Handoff (Create subtask rows ONLY)
-
-The handoff body Mode 2 will draft and append to the row's Outcome on today's dated Notion page. Plain language, audience = team dev. The PM copies the rendered text and delivers it through whatever channel they use for that team member (in-person walk-through, email, chat app, etc.). Flag rows skip this section.
+Length cap 600 chars. For `Flag` rows this becomes a 2–3 sentence "here's what came in" summary. For `Hand off parent task` rows the brief notes why this work is being handed off (work_type → non-pod routing). For `Reopen subtask` rows the brief surfaces what's NEW relative to the existing subtask, not a recap of the existing scope.
 
 ### H1: Sources
 
@@ -105,13 +117,27 @@ Only appears when the skill opened and read a document for context.
 
 ### H1: Recommended Action (context expansion)
 
-A short paragraph expanding on the action callout at the top of the page. Adds the WHY-this-choice reasoning so the PM understands the matcher's logic without re-deriving it. For Create subtask rows, this is where the assignee-pick reasoning (Job 6 branch trace) lives in narrative form.
+A short paragraph expanding on the action callout at the top of the page. Adds the WHY-this-choice reasoning so the PM understands the matcher's logic without re-deriving it. For `Create subtask` / `Reopen subtask` rows, this is where the assignee-pick reasoning (Job 6 branch trace, or Job 5.5 last-dev extraction for Reopen) lives in narrative form. For `Hand off parent task` rows this explains the work_type → pool routing. For `Flag` rows this names what is known about the signal and what the PM specifically needs to weigh.
 
 > Sub-task under `ECP AI Visibility Audit` parent task #110464 (currently assigned to you). Title: `Run AI Visibility audit on approved competitor list`. Assign to **Hitesh Asnani**.
 >
 > **Why Hitesh:** Already on the project (in followers); Ellen named him alongside you in the approval comment. SEO/AI audit specialist (Marketing/SEO Matrix). Branch (a) history-wins overrides the cross-matrix preference because prior involvement + AM mention is the decisive signal.
 
-(For Flag rows, this section names what is known about the signal and what the PM specifically needs to weigh.)
+### H1: Proposed Orbit Task Body (Create subtask / Create parent task rows ONLY)
+
+The full 6-section body that lands in Orbit when Mode 2 executes. Format per `schemas/orbit-dq-standard.md`, plain language per `writers/plain-language.md`. Skipped for `Reopen subtask` (existing subtask already has a body), `Hand off parent task` (existing parent already has a body), and `Flag` (no Orbit write) rows.
+
+### H1: Proposed New-Work Comment (Reopen subtask rows ONLY)
+
+The plain-language comment Mode 2 will post on the existing subtask. Header line `Reopened — new work from <signal_date IST>:` plus 2–4 sentences describing what the new signal adds. Source citation for the originating Gmail thread / Orbit comment included.
+
+### H1: PM Next Step (Flag rows ONLY)
+
+A short paragraph expanding the `pm_next_step` clause. What the PM should do, why, and any helper context (e.g., "Reply to Ellen on the Joe Warner thread; suggested devs given Joe framed the call as technical: <names from Orbit followers on #16320>"). Normal English.
+
+### H1: Proposed Handoff (Create subtask / Reopen subtask / Hand off parent task rows)
+
+The handoff body Mode 2 will draft and append to the row's Outcome on today's dated Notion page. Plain language, audience = team dev (for Create subtask / Reopen subtask) or pool leader (for Hand off parent task). The PM copies the rendered text and delivers it through whatever channel they use for that recipient. `Flag` and `Create parent task` rows skip this section (no delegate to brief).
 
 ### H1: AI Notes (if any)
 
@@ -158,9 +184,13 @@ The toggle stays closed by default. The PM never needs to open it. The skill rea
 ## Example (structure only, not content)
 
 ```
+[Top callout — Action Block — plain-text verb label per row type, no emoji]
+
 # Summary
-<one-line summary>
-<optional 1-2 sentence context>
+<topic-style one-line summary>
+
+# Task Brief
+<2-4 sentence paragraph: what the work is about + the new update / latest signal>
 
 # Sources
 
@@ -171,9 +201,9 @@ The toggle stays closed by default. The PM never needs to open it. The skill rea
 <scoped citation with trigger phrase + relevant extract>
 
 # Recommended Action
-<paragraph with reasoning>
+<paragraph with reasoning — assignee-pick logic for Create/Reopen, work_type → pool routing for Hand off, signal-weighing for Flag>
 
-# Proposed Orbit Task Body
+# Proposed Orbit Task Body  (Create subtask / Create parent task only)
 **DO:** ...
 **WHY:** ...
 **CONTEXT:** ...
@@ -181,13 +211,15 @@ The toggle stays closed by default. The PM never needs to open it. The skill rea
 **SELF-QA:** ...
 **REFS:** ...
 
-# Proposed Handoff
-<plain-English handoff text>
+# Proposed New-Work Comment  (Reopen subtask only)
+Reopened — new work from <date>:
+<2-4 sentences describing what's new>
 
-# Proposed Email
-To: ...
-Subject: ...
-Body: ...
+# PM Next Step  (Flag only)
+<paragraph expanding pm_next_step clause>
+
+# Proposed Handoff  (Create subtask / Reopen subtask / Hand off parent task)
+<plain-English handoff text for the recipient>
 
 # AI Notes
 <only if needed>

@@ -35,6 +35,49 @@ Same as create_task, but add `parent_id` pointing to the parent task.
 
 Subtask titles should include the parent context. Example: `[Agency X Homepage] QA: verify mobile breakpoints`.
 
+### Reopen an existing subtask (Reopen subtask path)
+
+Triggered by rows whose `recommended_action` matches `Reopen subtask under #<existing_subtask_id> — ...`. These rows are emitted by `synthesis/matcher.md` Job 5.5 when an open subtask of the same `work_type` already exists under the PM-owned parent. The executor flips status, appends a new-work comment, and reassigns to the developer who last worked the subtask. No `create_task` call fires.
+
+Required row fields (set by matcher Job 5.5):
+- `row.existing_subtask_id` — the subtask to reopen.
+- `row.last_dev_user_id` — the Orbit user ID of the last non-PM commenter (or fallback per Job 5.5 step 6).
+- `row.new_work_description` — plain-language comment describing what the new signal adds (composed by matcher Job 7 Reopen-path rules).
+
+Executor sequence (per row, all calls applied via the retry policy in `connector-failure-notify.md`):
+
+1. **Guard: inactive last-dev.** If `row.last_dev_user_id` is null (matcher Job 5.5 step 7 flagged inactive dev or no-non-PM-history edge), skip the reassign + status flip entirely. Append only the comment via `add_task_comment(existing_subtask_id, new_work_description)` so the existing subtask carries an audit trail, and write Outcome: `HELD — last dev on subtask #<existing_subtask_id> is inactive; comment posted for audit. Please reassign manually.` Do not error; the row holds for PM.
+2. **Reassign.** Call `update_task(existing_subtask_id, assignee=last_dev_user_id)`. If the subtask's current assignee is already `last_dev_user_id` (e.g. the dev never got formally unassigned when the subtask went idle), skip this call — no change needed.
+3. **Status flip.** Call `update_task(existing_subtask_id, task_status_id=24)` to flip back to `To Do`. If the subtask is already at `To Do`, skip. If it's at a non-Done active state (`In Progress`, `In Review`, `Waiting for Feedback`), also skip — moving to `To Do` would lose progress. Append a note to the Outcome: `Status preserved at <current_status>; only comment + reassign applied.`
+4. **Comment.** Call `add_task_comment(existing_subtask_id, comment=<header + new_work_description>)` where the header reads `Reopened — new work from <signal_date IST>:` and the body is `row.new_work_description` rendered as HTML (paragraphs, bold, lists allowed per `mcp__...orbit.add_task_comment` content rules). The comment cites the originating signal (Gmail thread URL or new Orbit comment URL).
+5. **Outcome string.** Write Outcome: `Reopened subtask #<existing_subtask_id> under parent #<parent_id> → Orbit [link]. Reassigned to <last_dev name>. Comment posted. Handoff draft for <last_dev first_name> appended below.`
+
+Edge cases:
+- **Existing subtask was closed between Job 5.5 detection and Mode 2 execution.** If `get_task_details(existing_subtask_id)` returns `is_completed == 1` at execution time, do NOT reopen the closed subtask — fall back to the standard `create_task` Create-subtask path using the matcher's pre-composed 6-section body (matcher Job 7 always composes one even on Reopen rows, for exactly this rollback path). Write Outcome: `Existing subtask #<existing_subtask_id> was closed since Mode 1 — created new subtask #<new_id> under parent #<parent_id> instead.`
+- **`update_task` reassign returns 403** (Orbit refuses reassign to the picked user — e.g. user lost project access). Skip the reassign, post the comment + status flip, and write Outcome: `HELD — could not reassign to <last_dev name> (403). Comment posted; please reassign manually.`
+- **All Orbit calls succeed but the comment add fails.** Non-blocking. Log the failure and continue — the reassign + status flip already happened, so the dev sees the row in their queue; the PM can post the context comment manually.
+
+### Hand off parent task (Hand off path)
+
+Triggered by rows whose `recommended_action` matches `Hand off parent task to <pod leader> — ...`. These rows are emitted by `synthesis/matcher.md` Job 5 when `work_type ∈ {AUDIT, QUOTE, SEO, DESIGN, CONTENT, BA}` — work that does not touch HTML/PHP/QA pod resources. The executor reassigns the existing PM-owned parent task directly to the functional pool leader; no subtask is created.
+
+Required row fields:
+- `row.parent_task_id` — the PM-owned parent to hand off.
+- `row.recommended_assignee_user_id` — the pod leader's Orbit user ID (set by matcher Job 6 Hand-off path).
+- `row.work_type` — for the audit-trail comment.
+
+Executor sequence:
+
+1. **Reassign.** Call `update_task(parent_task_id, assignee=recommended_assignee_user_id, add_followers=[PM_user_id])`. The PM stays on as a follower for visibility — they remain the coordination anchor even though the named assignee is now the pool leader. If `recommended_assignee_user_id` matches the parent's current `assignee_id`, skip (no change).
+2. **Audit-trail comment.** Call `add_task_comment(parent_task_id, comment=<header + handoff body>)` where the header reads `Handed off to <pool> lead per PM's morning queue (work_type: <work_type>).` and the body briefly cites the originating signal that triggered the handoff. This is internal-audit only — `comment_type: general`, never `client`.
+3. **Outcome string.** Write Outcome: `Parent #<parent_task_id> reassigned to <pool leader name> (<pool> lead). PM kept as follower. Handoff comment posted.`
+
+No new task is created. No 6-section body is written. The Notion row's `Proposed Handoff` section carries the plain-language handoff text the PM can copy if they want to ping the pool leader externally; the executor's only Orbit write is the reassignment + audit comment.
+
+Edge cases:
+- **Pool leader not resolved.** If matcher Job 6 surfaced `Uncertain:` (empty functional_pool / matrix unavailable), the row's `recommended_assignee_user_id` is null. The executor MUST NOT auto-pick a fallback. Write Outcome: `HELD — no pool leader resolved for work_type <work_type>. Please reassign manually.` PM resolves via note in a follow-up morning.
+- **Pool leader matches PM.** If the resolved leader is the PM themselves (degenerate case — e.g. the PM also leads the Quoting pool), skip the reassign (no change in assignee) and write Outcome: `Handoff target resolved to you (PM) — parent stays on your plate. No reassign fired.`
+
 ### Create a parent task (Possible Orbit miss path)
 
 Triggered by rows whose `recommended_action` matches `Create parent task on <project> assigned to you` — i.e., `Create parent task` verb rows emitted by `synthesis/matcher.md` Job 5's Possible-Orbit-miss detection. These rows surface a Gmail-only critical-language signal that had no corroborating Orbit task; on PM approval, this executor creates the missing parent.
@@ -78,9 +121,11 @@ Edge cases:
 
 Pass `assignee` at create_subtask time.
 
-Reassignment is **not** a queue-driven action under the current Output gating rule (`synthesis/matcher.md` — `Create subtask` and `Flag` are the only two queue actions). Ad-hoc and Maintenance signals that previously triggered Reassign now become `Create subtask` rows under the PM-owned parent.
+Reassignment now has TWO queue-driven paths (per the 5-verb action set):
+- **`Reopen subtask`** — executor reassigns the existing subtask to its last non-PM dev (see Reopen subtask path above).
+- **`Hand off parent task`** — executor reassigns the existing PM-owned parent to the functional pool leader (see Hand off path above).
 
-Reassignment via PM note (e.g., `PM Notes: actually assign to Ravi instead`) is still possible — `synthesis/note-interpreter.md` resolves the override BEFORE the create_subtask call fires, so the sub-task is created with the corrected assignee from the start. There is no post-create reassignment path in Mode 2.
+Pre-execution reassignment via PM note (e.g., `PM Notes: actually assign to Ravi instead`) is still resolved by `synthesis/note-interpreter.md` BEFORE any executor fires, so the relevant call (create_task, update_task on existing subtask, update_task on parent) uses the corrected assignee from the start. There is no post-execute reassignment path in Mode 2.
 
 ### Update a task
 
@@ -194,6 +239,9 @@ Build the `Outcome` string for the Morning Queue row. Format is concise and spec
 - `Status updated → [new status] in Orbit [link]` (PM-note override only)
 - `Due date changed → [new date] in Orbit [link] (category: [category])` (PM-note override only)
 - `Severity bumped → [new severity] in Orbit [link]` (PM-note override only)
+
+- `Reopened subtask #<id> under parent #<parent_id> → Orbit [link]. Reassigned to <last_dev_name>. Comment posted.` (Reopen subtask path)
+- `Parent #<parent_id> reassigned to <pool leader name> (<pool> lead). PM kept as follower.` (Hand off parent task path)
 
 Multiple operations combine with periods: `Subtask #110890 created under parent #110464 → Orbit [link]. Handoff draft for Hitesh appended below.`
 

@@ -69,21 +69,25 @@ If the running PM's first name does not match any matrix's PM row, set `running_
 
 ## Role normalization
 
-Matrix uses the org's terminology. Pod-inference uses the existing role enum (`FE | BE | WP | Design | QA | Content | Full-stack | BA | Unknown`). Map:
+Matrix uses the org's terminology. Pod-inference uses the existing role enum (`FE | BE | WP | Design | QA | Content | BA | Audit | Quote | SEO | Full-stack | Unknown`). Map:
 
 | Matrix label | Pod-inference role |
 |---|---|
-| `HTML` | `FE` |
-| `WordPress / PHP` (any spelling — `WordPress · PHP`, `WP/PHP`) | `WP` |
+| `HTML` | `FE` (strict — HTML/CSS pod resource per `synthesis/matcher.md` Job 6 pod-boundary table) |
+| `WordPress / PHP` (any spelling — `WordPress · PHP`, `WP/PHP`) | `WP` (strict — backend PHP logic only; audits route to `Audit` instead) |
 | `QA` | `QA` |
-| `Business Analyst` / `BA` | `BA` (new — treated as `Unknown` for non-BA tasks) |
+| `Business Analyst` / `BA` | `BA` |
 | `Special Allocation` | role-by-context — read the member's Orbit `department` to classify |
-| `Marketing`, `SEO` | `Content` (when task domain matches) |
+| `Marketing`, `Marketing / SEO`, `SEO` | `SEO` when task is SEO-keyword work; `Audit` when task is an SEO / AI / ADA / performance audit; `Content` when copy/blog work. Same matrix pool, role disambiguated by task context. |
+| `Audit team`, `Audits` (when matrix exposes one) | `Audit` |
+| `Quoting`, `Quote` | `Quote` |
 | `Design` (matrix or row label) | `Design` |
 | `Development Team` (SaaS Matrix) | `Full-stack` |
 | `Server / Infrastructure`, `Hosting / Infrastructure` | `Unknown` (rarely targeted by pod-inference; keep for completeness) |
 | `Lead`, `Mentor`, `Head`, `Owner / Lead`, `Core Team`, `Team` | role-by-context — read the member's Orbit `department` |
 | `Account Managers aligned` | excluded from pod (existing rule #2 in `synthesis/pod-inference.md`) |
+
+The `Audit`, `Quote`, and `SEO` roles are NOT routed via the 4-branch tree under Job 6's `Create subtask` path — they reach the pod-inference output only because their members must be enumerable for the `Hand off parent task` path's pool-leader lookup. Routing per work_type lives in `synthesis/matcher.md` Job 5 + Job 6.
 
 `PMs` / `PM` rows are also excluded from pod (the running PM themselves never gets recommended as their own assignee per the existing `exclude_from_pod` rule).
 

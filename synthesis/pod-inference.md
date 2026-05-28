@@ -74,15 +74,18 @@ For each remaining candidate, infer their role from three signals (in priority o
 3. **Task history on this project** — what types of tasks they've been assigned. If someone has 50 FE tasks across projects and 5 BE tasks, they're an FE dev. Useful for floaters and cross-functional contributors.
 
 Map matrix hint + department + task history to a role:
-- `FE` — front-end developer (matrix `HTML`)
-- `BE` — back-end developer
-- `WP` — WordPress specialist (matrix `WordPress / PHP`)
-- `Design` — visual / UI designer (matrix `Design` matrix or `(designer)` parenthetical)
-- `QA` — QA engineer (matrix `QA`)
-- `Content` — content writer / copy (matrix `Marketing` content writer / `Content` department)
-- `BA` — business analyst (matrix `Business Analyst`)
-- `Full-stack` — broad history across FE + BE (matrix SaaS `Development Team`)
-- `Unknown` — can't infer
+- `FE` — front-end developer (matrix `HTML`). **Strict scope:** HTML / CSS / responsive markup / page structure / navigation work routes here exclusively (per `synthesis/matcher.md` Job 5a work-type `HTML_CSS` and Job 6 pod-boundary table).
+- `BE` — back-end developer.
+- `WP` — WordPress specialist (matrix `WordPress / PHP`). **Strict scope:** server-side PHP logic, custom WP plugins, database hooks, API work. Audits do NOT route here — they go to `Audit` below.
+- `Design` — visual / UI designer (matrix `Design` matrix or `(designer)` parenthetical).
+- `QA` — QA engineer (matrix `QA`).
+- `Content` — content writer / copy (matrix `Marketing` content writer / `Content` department).
+- `BA` — business analyst (matrix `Business Analyst`).
+- `Audit` — auditing specialist (matrix `Marketing` / SEO sub-pool; covers SEO audits, AI audits, ADA / accessibility audits, performance audits). Audit work routes here, NOT to `WP` or `QA`.
+- `Quote` — quoting / scoping / estimation specialist (functional pool `Quoting`). Mostly Pravin handles quote related work.
+- `SEO` — SEO specialist (matrix `Marketing` / SEO sub-pool, same pool as `Audit`).
+- `Full-stack` — broad history across FE + BE (matrix SaaS `Development Team`).
+- `Unknown` — can't infer.
 
 ### Step 4 — Rank by project familiarity
 
@@ -129,7 +132,7 @@ Output format:
     {
       "user_id": <int>,
       "name": <string>,
-      "role": "FE" | "BE" | "WP" | "Design" | "QA" | "Content" | "BA" | "Full-stack" | "Unknown",
+      "role": "FE" | "BE" | "WP" | "Design" | "QA" | "Content" | "BA" | "Audit" | "Quote" | "SEO" | "Full-stack" | "Unknown",
       "source": "matrix" | "orbit-history" | "both",
       "in_pm_matrix": <bool>,
       "matrix_role_hint": <string or null>,    // verbatim matrix label, e.g., "WordPress / PHP"
@@ -161,12 +164,41 @@ When `matrix_available: false`, `running_pm_matrix`, `floater_pool`, and `functi
 
 ## How the matcher uses this output
 
-`synthesis/matcher.md` § Job 6 runs a 4-branch decision tree:
+`synthesis/matcher.md` § Job 6 routes based on the row's verb (set by Job 5):
+
+### `Create subtask` / `Reopen subtask` (work_type ∈ HTML_CSS, PHP_BACKEND, QA)
+
+4-branch decision tree, with role-fit filter driven by Job 5a's `work_type` per the pod-boundary table:
 
 - **(a) History wins.** If at least one role-fit candidate has `has_history_on_project = true`, pick the one with highest `familiarity_score`. No availability check fired.
 - **(b) Matrix availability fallback.** If no role-fit candidate has history but the running PM's matrix has at least one role-fit member, the matcher calls `compute_availability` on those members and picks the highest score.
 - **(c) Floater fallback.** If the PM's matrix has no role-fit member, the matcher checks `floater_pool`, calls `compute_availability` on Floater role-fit members, and picks the highest score.
-- **(d) Cross-matrix Uncertain.** If neither PM-matrix nor Floaters fit, `recommended_assignee = null` and AI Notes lists role-fit candidates from `functional_pools` (Design / QA / Maintenance / AI / SaaS / Marketing / WIC) for the PM to pick.
+- **(d) Cross-matrix Uncertain.** If neither PM-matrix nor Floaters fit, `recommended_assignee = null` and AI Notes lists role-fit candidates from `functional_pools` for the PM to pick.
+
+For `Reopen subtask` rows, the matcher's Job 5.5 already picked `last_dev_user_id` (last non-PM commenter on the existing subtask). Job 6 short-circuits to that user — no decision tree fires.
+
+### `Hand off parent task` (work_type ∈ AUDIT, QUOTE, SEO, DESIGN, CONTENT, BA)
+
+Routes to a functional pool leader, not a pod member. The mapping:
+
+| `work_type` | Functional pool consulted (from `functional_pools`) |
+|---|---|
+| `AUDIT` | `Marketing` (covers SEO audits, AI audits, ADA / accessibility, performance — Manan-led pool) |
+| `QUOTE` | `Quoting` |
+| `SEO` | `Marketing` (same pool as AUDIT) |
+| `DESIGN` | `Design` |
+| `CONTENT` | `Marketing` |
+| `BA` | `Marketing` if BA not modeled as its own functional pool; otherwise the BA pool / matrix Business Analyst row |
+
+Job 6 reads the pool list, picks the member tagged as lead (matrix `Lead` / `Owner / Lead` / `Head` / `Mentor` `role_hint`); falls back to the highest-familiarity member when no lead is tagged. Render `recommended_assignee` as `<leader name> (<pool> lead) — handoff target for <work_type> work.` Pool-based routing keeps named individuals out of skill files — the Pod Matrix resolves names at runtime.
+
+If the functional_pool is empty (matrix unavailable, or the pool truly has no members for this PM's run), drop `Uncertain:` AI Note listing the broader `functional_pools` for PM pick.
+
+### `Flag` / `Create parent task`
+
+Short-circuits per Job 6's own short-circuit sub-section in `synthesis/matcher.md`. `Flag` has no recommended assignee (`—`); `Create parent task` always points to PM.
+
+### Override rules (apply to all paths)
 
 The PM's note always wins over any of these picks (existing rule).
 
