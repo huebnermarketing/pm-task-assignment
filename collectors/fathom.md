@@ -93,6 +93,8 @@ fetch_enrichment(reference, signal_context) -> EnrichmentResult | null
 
 `relevant_action_items` is **scoped** — only action items whose text overlaps with the primary signal's project name, actor names, or topic keywords. The full action-item list is not returned; that would defeat the enrichment-only contract.
 
+When enrichment fired, the matcher (Job 7) treats `meeting_date` as the anchor-candidate timestamp for `row.latest_signal_anchor` (per SKILL.md rule #24, source = `fathom_meeting`, excerpt = `summary_excerpt`). Same field reuse for the `gmail_attachment_fallback` path. No separate `latest_signal` field on this service.
+
 ## Lookup strategy
 
 The service picks the cheapest tool call that satisfies the reference:

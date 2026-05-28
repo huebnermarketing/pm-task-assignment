@@ -92,6 +92,10 @@ Never copy a sample verbatim. Use it for style guidance only.
 
 When no samples are available, default to a generic professional-warm tone at the required grade level.
 
+## AM framing
+
+When output mentions an AM by name (Summary, Task Brief, Recommended Action, Outcome bodies, PM Next Step, AI Notes, AM Ping Drafts), frame the AM as client-relay per `references/am-context.md` — never as teammate, dev-picker, scope-approver, or delivery owner. The right-vs-wrong table lives at that reference.
+
 ## How to apply the rule
 
 Whenever any module calls this writer:

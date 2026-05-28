@@ -165,6 +165,52 @@ For each task in the workload response:
 - Tasks already surfaced in `priority_signals[]` (deduplicate by task_id between priority and normal passes).
 - Tasks where status is `Archive` (already complete from PM's perspective).
 
+## Comment ordering — descending (newest first) when emitted by this collector
+
+The Orbit MCP's `list_task_comments` returns top-level comments **ordered oldest first** (per the MCP's own description: `"Pagination is applied to top-level comments only, ordered oldest first"`). That ordering is **the source ordering**, not the relationship-map ordering.
+
+**This collector flips the order on the way out.** Every per-task `comments[]` array in the relationship map (and every list passed downstream to the matcher) is sorted **descending by `created_at` — newest first**. The collector applies the reversal once, after the MCP response lands, before relationship-map assembly. Reasons:
+
+- The matcher's mental model on every Create-subtask / Reopen-subtask / Hand-off / Flag row is "what just triggered this?" — answering that requires `comments[0]` to be the newest, not the oldest.
+- Long comment histories (10+ entries, sometimes 50+) used to surface a stale comment at index 0; the matcher's attention drifted before it reached the actual trigger. Newest-first eliminates that failure mode by construction.
+- Job 5.5 (existing-subtask reuse, see `synthesis/matcher.md`) reads sibling subtasks' last non-PM commenter — also newest-first.
+
+Apply the reversal uniformly:
+
+- Per-task `comments[]` in the relationship map.
+- Anywhere a list of comments is returned to the matcher.
+- The cached `list_task_comments(task_id)` payload that survives across Job 7 deep-read consumers.
+
+If the MCP changes its source ordering in a future version, only this collector adjusts — downstream consumers continue to read `comments[0]` as newest.
+
+## Per-task `latest_signal` field — the deep-read anchor
+
+Every task entry in the relationship map carries a structured `latest_signal` field that names the single most-recent event on the task. The matcher (Job 7) picks the newest across the row's input sources and passes it through as `row.latest_signal_anchor`; the writer renders it as the row-detail `**Triggered by:** ...` line. Per SKILL.md non-negotiable rule #24 — every row must carry an anchor or be dropped to `filtered_signals`.
+
+Selection rule for `latest_signal`. Compute across these candidate sources for the task and pick the entry with the most-recent `timestamp_iso`:
+
+1. **`orbit_comment`** — newest comment on the task (`comments[0]` after the descending sort above). Source id = comment id, author = comment's `user_id` / `user_name`, excerpt = first 240 chars of the comment text (HTML stripped to plain text).
+2. **`orbit_task_body_update`** — the task's own `updated_at` if it postdates every comment AND the corresponding activity_log entry on this task surfaces a `field_change` event affecting `title`, `description`, `due_date`, or `severity`. Source id = task_id, author = the actor that performed the update (from activity_log), excerpt = the field-change description or the first 240 chars of the body if a body update.
+3. **`orbit_status_change`** — newest activity_log `status_change` event on this task. Source id = activity_log entry id (or task_id if entry id absent), author = the actor, excerpt = `"<from_status> → <to_status>"`.
+4. **`orbit_due_date_change`** — newest activity_log `due_date_change` event on this task. Same shape as status_change; excerpt = `"<from_date> → <to_date>"`.
+
+Tiebreaker: if two candidates share an identical timestamp, pick in the priority order above (1 > 2 > 3 > 4 — comments win over body updates win over status changes win over due-date changes). Excerpt strips HTML tags, collapses whitespace, and caps at 240 chars.
+
+The `latest_signal` field lives on every task entry in the relationship map regardless of whether the task surfaces as a queue row. The matcher reads it during Job 7 to anchor the row. Shape:
+
+```
+latest_signal: {
+  source: "orbit_comment" | "orbit_task_body_update" | "orbit_status_change" | "orbit_due_date_change",
+  id: <int — comment id, activity_log entry id, or task_id depending on source>,
+  timestamp_iso: <ISO 8601>,
+  author_id: <int>,
+  author_name: <string>,
+  excerpt: <string, ≤ 240 chars, plain text>
+}
+```
+
+If the task has zero comments AND no activity_log events AND no body updates since creation (rare — fresh task with no activity beyond creation), set `latest_signal` to the creation event: `source: "orbit_task_body_update"`, `id: task_id`, `timestamp_iso: created_at`, author = `created_by_id` / name, excerpt = the task title. Never null — the matcher and writer assume the field is present on every task.
+
 ## Per-row deep-read (mandatory, fired by matcher Job 7)
 
 The collection-phase calls above return the universe + the deltas since `last_run_timestamp`, which is enough for the matcher to decide which tasks become rows. But composing the proposed 6-section body for a row requires **deeper context than the workload snapshot or the activity-log delta provides** — specifically, the full task description and the complete comment history (including comments older than `last_run_timestamp`).
@@ -254,7 +300,15 @@ Structure:
           "parent_task_id": <int or null — null for top-level parents, set for sub-tasks>,
           "status": <string>,
           "due_date": <ISO date or null>,
-          "is_pm_owned": <bool — assignee_id == PM_user_id at collection time>
+          "is_pm_owned": <bool — assignee_id == PM_user_id at collection time>,
+          "latest_signal": {
+            "source": <"orbit_comment" | "orbit_task_body_update" | "orbit_status_change" | "orbit_due_date_change">,
+            "id": <int>,
+            "timestamp_iso": <ISO 8601>,
+            "author_id": <int>,
+            "author_name": <string>,
+            "excerpt": <string ≤ 240 chars, plain text>
+          }
         }
       ]
     }

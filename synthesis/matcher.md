@@ -84,6 +84,7 @@ A list of items. Each item becomes one row in the Morning Queue database. For ea
 - `proposed_orbit_body` — 6-section task body (from `schemas/orbit-dq-standard.md`), in plain language (per `writers/plain-language.md`) — used by the Orbit Executor if approved
 - `proposed_handoff` — plain-language message for the assignee, copied + sent by PM through whatever channel they use for that team member
 - `proposed_email` — normal-English email draft if the action involves emailing an AM or client
+- `latest_signal_anchor` — `{ source, id, timestamp_iso, author_name, excerpt, source_url }`. Required on every row. Picked by Job 7 as the newest across the collectors' per-task / per-thread `latest_signal` fields plus any attached Fathom `meeting_date`. Pass-through, not recomputed. Writer renders as the first line of the Task Brief block (`**Triggered by:** ...`). See SKILL.md rule #24.
 
 ## Jobs in order
 
@@ -498,6 +499,23 @@ For each input source — (a) the originating Orbit task's full details + comple
 5. **Do not silently truncate.** If a thread or comment history is too long to summarize fully, capture the key facts in the body sections and add a one-line pointer in REFS: `Full thread (N messages) at <gmail thread URL>` or `Full comment history (M comments) on <orbit task URL>`.
 
 This rule applies to **priority-lane rows especially**: an AM-handed parent task created overnight may have only a one-line title in Orbit ("Conversant Phase 2 Sprint 12 dev planning"), but the thread between the AM and PM about it almost always carries the actual scope, the named delegate the AM has in mind, the deadline reasoning, and the constraints. Without email enrichment the proposed sub-task body would be uselessly thin; with email enrichment it gives the delegate everything they need to start without asking.
+
+#### Latest-signal anchor (applies to EVERY row, including Flag rows)
+
+After all deep-reads land, Job 7 selects `row.latest_signal_anchor` as the newest signal across the row's input sources. The collectors already do the heavy lifting — each task carries `latest_signal` (`collectors/orbit.md`), each Gmail signal carries `latest_signal` (`collectors/gmail.md`), each attached Fathom enrichment carries `meeting_date`. Job 7 picks the newest of these by `timestamp_iso` and copies it through — no recomputation. Tiebreaker: prefer the source that carries the "what's new" content the matcher used when composing the row.
+
+```
+row.latest_signal_anchor = {
+  source: "orbit_comment" | "orbit_task_body_update" | "orbit_status_change" | "orbit_due_date_change" | "gmail_message" | "fathom_meeting",
+  id: <int or string>,
+  timestamp_iso: <ISO 8601>,
+  author_name: <string>,
+  excerpt: <string ≤ 240 chars, plain text>,
+  source_url: <string — link to the originating item>
+}
+```
+
+If no input source carries a signal (rare — a row with no trigger), drop to `filtered_signals` with `filter_reason: no_trigger_signal_identifiable` rather than ship with a null anchor. The writer's render needs this field; a row without it cannot render its Triggered-by line. Applies to every verb — Flag, Reopen subtask, Hand off parent task, Create parent task — same contract, no exceptions.
 
 #### Path-specific body rules
 

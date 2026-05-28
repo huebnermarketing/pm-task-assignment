@@ -214,6 +214,10 @@ Explicitly forbidden: Pipedrive, Apollo, Common Room, Hex, Calendar, Keka, Atlas
 
 22. **Project identifiers user-facing → use Orbit's `project_number`, never `id` or `url_slug`.** Orbit's `get_project_details` returns three project identifiers: `id` (internal numeric PK, e.g. `8598`), `url_slug` (URL-encoded id, e.g. `"51083298598"`), and `project_number` (the user-visible code shown in the Orbit UI, e.g. `"16915"`). Every user-facing rendering of a project — Notion `Project` column, Summary text, Sources block citations, Slack drafts, handoff drafts — uses `project_number` rendered as `#<project_number>` (with the leading hash). Internal `id` and `url_slug` are NEVER user-facing; they only appear inside URLs (where Orbit needs them) and inside the relationship map (where downstream tooling reads them). Format: `<Project Name> (#<project_number>)` for the Project column; `Process Barron Change Order #16915` for inline Summary mentions.
 
+23. **AM-framing rule — AMs are client-relay, never teammates.** Every text the skill renders that mentions an AM (Summary, Task Brief, Recommended Action, Outcome handoff bodies, PM Next Step, AI Notes, AM Ping Drafts) frames the AM as the client-relay channel — never as an internal teammate, never as the developer-picker, never as the scope-approver, never as the delivery-owner. See `references/am-context.md` for the canonical role description and the right-vs-wrong framing table. The 1 PM ↔ 1 AM cardinality is locked: Preferences carries the single AM. Existing priority-lane phrasings (`<AM> put this on your plate overnight, due today`) already comply and stay verbatim.
+
+24. **Latest-signal anchor required on every row.** Every queue row MUST carry `latest_signal_anchor` — the single most-recent signal across all deep-read sources that triggered the row (source, id, timestamp, author, excerpt, source link). The collector emits a per-task / per-thread `latest_signal` field; the matcher selects the newest across sources as the row's anchor and passes it through; the writer renders it as the first line of the row's H1 Task Brief block (`**Triggered by:** ...`). The render requirement IS the gate — a row with a null anchor cannot render. Structural defense against silent missed-comment failures: collector comment lists are sorted newest-first so `comments[0]` is always the trigger by construction, and the required-field flow makes "matcher silently skipped the newest comment" impossible without the row visibly failing to render its Triggered-by line.
+
 ## File map
 
 Everything below this file provides the detailed behavior. Load the specific file when that behavior is needed.
@@ -250,6 +254,7 @@ Everything below this file provides the detailed behavior. Load the specific fil
 - `references/due-date-categories.md` — PM note → category ID mapping.
 - `references/status-values.md` — Status enum semantics.
 - `references/pod-matrix.md` — read-only Pod Matrix (Notion) parsing, name → Orbit user_id resolution, fallback when matrix unavailable.
+- `references/am-context.md` — Account Manager role description + sentence framing (right-vs-wrong examples). Read once per session so AM mentions in Summary / Task Brief / Recommended Action / handoff bodies frame the AM as client-relay, not as an internal teammate.
 
 ## Build status
 

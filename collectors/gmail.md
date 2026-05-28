@@ -110,9 +110,46 @@ Use the Orbit relationship map (from the Orbit collector) to classify each sende
     "actor_emails": [<string>, ...],
     "topic_keywords": [<string>, ...],
     "timestamp": <ISO datetime>
+  },
+  "latest_signal": {
+    "source": "gmail_message",
+    "id": <string — message_id of the newest non-PM message in the thread>,
+    "thread_id": <string>,
+    "timestamp_iso": <ISO 8601>,
+    "author_name": <string — sender display name>,
+    "author_email": <string — sender canonical email>,
+    "excerpt": <string ≤ 240 chars — first 240 chars of the message body, plain text>
   }
 }
 ```
+
+## `latest_signal` field — the deep-read anchor for Gmail
+
+Every Gmail signal carries a structured `latest_signal` field naming the newest non-PM message in the thread. This mirrors the Orbit collector's per-task anchor (`collectors/orbit.md` § Per-task `latest_signal` field) and serves the same purpose: the matcher (Job 7) picks the newest across the row's input sources as `row.latest_signal_anchor`, the writer renders it. Per SKILL.md non-negotiable rule #24 — every row must carry an anchor or be dropped to `filtered_signals`.
+
+Selection rule:
+
+1. Walk the thread's messages in `gmail_read_thread` output, descending by message timestamp.
+2. Pick the first message whose sender is NOT the PM's canonical email or any alias. The PM's own send IS NOT a new external signal — it's the PM talking. Skip past it.
+3. If every message in the thread is from the PM (a pure outbox thread where no external party has yet replied), pick the newest message anyway, set `latest_signal.author_email` to the PM, and let the matcher decide whether to drop the row.
+
+Shape:
+
+```
+latest_signal: {
+  source: "gmail_message",
+  id: <string — message_id>,
+  thread_id: <string>,
+  timestamp_iso: <ISO 8601>,
+  author_name: <string>,
+  author_email: <string>,
+  excerpt: <string ≤ 240 chars, plain text — strip HTML, collapse whitespace, cap at 240>
+}
+```
+
+The excerpt is taken from the message body's text content (HTML stripped). For HTML-only messages with no text part, render the HTML to plain text first.
+
+The field is populated unconditionally on every Gmail signal — no opt-in, no skip. It is the contract the matcher and writer rely on for the anchor invariant.
 
 ## Context-link metadata
 

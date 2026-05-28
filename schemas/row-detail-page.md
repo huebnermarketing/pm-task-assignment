@@ -63,9 +63,22 @@ The topic-style one-liner that matches the `Summary` column exactly. Below the a
 
 ### H1: Task Brief
 
-A 2–4 sentence paragraph describing what the work is about + the new update / latest signal that triggered this row. Composed by matcher Job 7b. Pulls primarily from the most recent input source (top of email thread, latest Orbit comment, AM clarification) — not from the older parent-task description. The full Orbit task body / older context still lives in the 6-section Orbit body (further down on this page for Create subtask / Create parent task rows) and the Sources block (every row).
+The first line under the heading is the **Triggered-by line** — built from `row.latest_signal_anchor` (matcher Job 7 output, per SKILL.md non-negotiable #24). It names the newest signal across the row's input sources — the answer to "what is this row reacting to right now?". Required on every row; rendered unconditionally. Format:
 
-Length cap 600 chars. For `Flag` rows this becomes a 2–3 sentence "here's what came in" summary. For `Hand off parent task` rows the brief notes why this work is being handed off (work_type → non-pod routing). For `Reopen subtask` rows the brief surfaces what's NEW relative to the existing subtask, not a recap of the existing scope.
+```
+**Triggered by:** <source label> — <author_name> @ <timestamp_local> — "<excerpt one-line>" [Open link](<source_url>)
+```
+
+Source label per `anchor.source`: `orbit_comment` → `Orbit comment`, `orbit_task_body_update` → `Orbit task update`, `orbit_status_change` → `Orbit status change`, `orbit_due_date_change` → `Orbit due-date change`, `gmail_message` → `Gmail`, `fathom_meeting` → `Fathom meeting`.
+
+Examples:
+
+- `**Triggered by:** Orbit comment — Hitesh Asnani @ 28 May 2026, 5:42 AM IST — "Pushed the staging build, ready for QA." [Open in Orbit](...)`
+- `**Triggered by:** Gmail — Jane Miller @ 27 May 2026, 11:18 PM IST — "Per our call, the homepage revisions need to ship by Friday." [Open thread](...)`
+
+Below the Triggered-by line, the H1 Task Brief carries a 2–4 sentence paragraph composed by matcher Job 7b: what the work is about + the new update / latest signal that triggered this row. Pulls primarily from the most recent input source (top of email thread, latest Orbit comment, AM clarification) — not from the older parent-task description. The full Orbit task body / older context still lives in the 6-section Orbit body (further down on this page for Create subtask / Create parent task rows) and the Sources block (every row).
+
+Length cap (paragraph only) 600 chars. For `Flag` rows the paragraph becomes a 2–3 sentence "here's what came in" summary. For `Hand off parent task` rows the brief notes why this work is being handed off (work_type → non-pod routing). For `Reopen subtask` rows the brief surfaces what's NEW relative to the existing subtask, not a recap of the existing scope.
 
 ### H1: Sources
 

@@ -90,6 +90,7 @@ Cross-row consistency checks:
 - Every item's `recommended_action` text must start with one of the five locked verbs.
 - Every item must carry a `task_brief` (Job 7b output), non-null, ≤ 600 chars.
 - Every item's `project` field (if not `Standalone`) must render as `<name> (#<project_number>)` where `project_number` is the string Orbit user-visible code, not the integer `id`.
+- Every item must carry `latest_signal_anchor` (non-null, all sub-fields populated). A null anchor means Job 7 should have dropped the row to `filtered_signals` (`filter_reason: no_trigger_signal_identifiable`) rather than emit it; if one slips through, route to `filtered_signals` here with `filter_reason: writer_gating_caught_missing_anchor` and surface in the Run Log.
 
 Any item failing these checks is moved from the items array to the `filtered_signals` array with `filter_reason: writer_gating_caught_drift` before row creation. Log to Run Log. This is a safety net; the matcher should have already prevented these — but if it didn't, the writer catches the drift rather than polluting the queue.
 
@@ -116,7 +117,7 @@ For each item in the matcher's output array (after Step 5.5 gating):
 2. Populate the row's page content per `schemas/row-detail-page.md` (block order is load-bearing — see schema):
    - Top callout — Action Block (no heading) — per the 5 verb variants in `schemas/row-detail-page.md` Top callout section.
    - `Summary` heading + matcher's topic-style summary
-   - **`Task Brief` heading + matcher's `row.task_brief` paragraph (Job 7b output)** — placed BETWEEN Summary and Sources so the PM reads what the work is + what's new before scanning citations
+   - **`Task Brief` heading + Triggered-by line + matcher's `row.task_brief` paragraph (Job 7b output)** — placed BETWEEN Summary and Sources so the PM reads what the work is + what's new before scanning citations. The Triggered-by line is THE FIRST LINE of this block (above the Job 7b narrative), rendered from `row.latest_signal_anchor`: bold-label + source + author + timestamp + 1-line excerpt + source link. Format per `schemas/row-detail-page.md` Task Brief section. Required — Step 5.5 already rejects rows with a null anchor, so render unconditionally.
    - `Sources` heading + full citations per `writers/source-citation.md`. Two cases:
      - **Job 4b Pass 1 (Gmail → Orbit cross-link).** When `context_signals[]` is populated on this row, render each linked Gmail signal as an H2 subsection under Sources. High-confidence cross-links go under the primary Sources list; weak cross-links (match_strength="weak") go under an H2 `Possible context` subsection.
      - **Job 4b Pass 2 (Fathom enrichment).** When `enrichment.fathom` is populated on this row (the matcher fetched a meeting context from `collectors/fathom.md`), render it under an H2 `Fathom enrichment` subsection per `schemas/row-detail-page.md`. Include the trigger phrase that caused the fetch, the scoped summary excerpt, relevant action items, attendees, and the recording link. Skip this subsection entirely if `enrichment.fathom` is null.
