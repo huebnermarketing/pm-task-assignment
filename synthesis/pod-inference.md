@@ -192,7 +192,14 @@ Routes to a functional pool leader, not a pod member. The mapping:
 
 Job 6 reads the pool list, picks the member tagged as lead (matrix `Lead` / `Owner / Lead` / `Head` / `Mentor` `role_hint`); falls back to the highest-familiarity member when no lead is tagged. Render `recommended_assignee` as `<leader name> (<pool> lead) — handoff target for <work_type> work.` Pool-based routing keeps named individuals out of skill files — the Pod Matrix resolves names at runtime.
 
-If the functional_pool is empty (matrix unavailable, or the pool truly has no members for this PM's run), drop `Uncertain:` AI Note listing the broader `functional_pools` for PM pick.
+**Named-lead exception (hardcoded, Hand off rows only).** Two work-type → person overrides bypass the pool-lead lookup above, per explicit PM directive (`synthesis/matcher.md` Job 6 § Named-lead exception):
+
+- `DESIGN` → **Jay Panchal** (Design lead).
+- `AUDIT` / `SEO` / `CONTENT` (Marketing/SEO matrix pool) → **Manan Rana** (Marketing/SEO lead).
+
+These fire regardless of Pod Matrix availability — they are NOT subject to the empty-pool Uncertain fallback below. `QUOTE` and `BA` keep the generic pool-lead routing. Only `Hand off parent task` rows are affected.
+
+If the functional_pool is empty (matrix unavailable, or the pool truly has no members for this PM's run) AND the row is not covered by the named-lead exception above, drop `Uncertain:` AI Note listing the broader `functional_pools` for PM pick.
 
 ### `Flag` / `Create parent task`
 

@@ -369,6 +369,15 @@ No Mode 2 step writes into `orbit_task_link` later — the column is frozen at r
 
 **Pod leader routing for `Hand off parent task` rows.** Job 5a's `work_type` (`AUDIT | QUOTE | SEO | DESIGN | CONTENT | BA`) maps to a functional pool (table below). Read the pool from `pod-inference.md` output's `functional_pools[<pool>]` and pick the named lead per the pool's first row (or fall back to the highest-familiarity member when no explicit lead row is tagged). Render `recommended_assignee` as `<leader name> (<pool> lead) — handoff target for <work_type> work.` If the functional_pool is empty (matrix unavailable, or pool truly empty), drop `Uncertain:` AI Note and surface candidates from the broader functional_pools for PM pick.
 
+**Named-lead exception (Marketing/SEO + Design) — Hand off rows only.** For `Hand off parent task` rows, two named leads override the generic pool-leader lookup above. This is a deliberate, explicit hardcoding (per PM directive — supersedes the no-named-person rule for these two leads only):
+
+| `work_type` on the Hand off row | Recommended assignee (hardcoded) |
+|---|---|
+| `DESIGN` | **Jay Panchal** (Design lead) |
+| `AUDIT`, `SEO`, `CONTENT` (Marketing/SEO matrix pool) | **Manan Rana** (Marketing/SEO lead) |
+
+Render `recommended_assignee` as `Manan Rana (Marketing/SEO lead) — handoff target for <work_type> work.` or `Jay Panchal (Design lead) — handoff target for design work.` accordingly. `DESIGN` always resolves to Jay Panchal even though design sometimes sits inside the broader Marketing/SEO org — the design carve-out wins over the Marketing/SEO default. This exception is **independent of Pod Matrix state** — it fires even when the matrix is unavailable or the functional_pool came back empty, so these two handoffs never fall to `Uncertain:` for lack of a resolvable lead. `QUOTE` and `BA` are NOT covered by this exception — they continue to use the generic functional-pool-leader lookup (Quoting lead, BA lead). Only `Hand off parent task` rows are affected; `Create subtask` routing (HTML/PHP/QA pods) is untouched.
+
 For all other rows (`Create subtask`, `Flag`), continue with the 4-branch decision tree below.
 
 Call `synthesis/pod-inference.md` with the item's project ID. It returns the candidate pool — matrix members ∪ Orbit followers/recent-assignees — with role hints, familiarity scores, `has_history_on_project` booleans, matrix membership flags, plus the `floater_pool` and `functional_pools` for fallback paths.
