@@ -178,12 +178,13 @@ Feed all collected signals (Orbit priority-lane + Orbit normal-pass + Gmail, eac
   3. **Every `signal.enrichment.fathom`** — meeting summary + action items.
   4. **External docs** referenced by any of the above, per `references/external-doc-access.md` (Drive / Docs / Sheets / SharePoint, read-only).
   
-  Weave extracted facts from all four sources into DO / WHY / CONTEXT / DONE-WHEN / SELF-QA / REFS per the source-agnostic mapping in `synthesis/matcher.md` Job 7 + `schemas/orbit-dq-standard.md` § Source rule. Flag rows skip body generation (and skip the per-row Orbit deep-read) but still render every enrichment in row detail Sources for PM scanning.
+  Weave extracted facts from all four sources into DO / WHY / CONTEXT / DONE-WHEN / SELF-QA / REFS per the source-agnostic mapping in `synthesis/matcher.md` Job 7 + `schemas/orbit-dq-standard.md` § Source rule. Flag rows skip body generation (and the full per-row Orbit deep-read) but still render every enrichment in row detail Sources for PM scanning. **Exception:** `pm_task_due_today` bare Flags fire a *light* deep-read (task details + newest comments only) to feed their "where this stands" task_brief — no body, no assignee, no handoff. See `synthesis/matcher.md` Job 7 § Light deep-read for due-today Flags.
 - **Job 8 — Generate proposed handoff** (Create subtask path only). Plain-language team handoff draft. Flag + Create parent task rows skip this (no delegate).
 - **Job 9 — Generate proposed email.** Skipped under current Output gating (PM handles emails outside the queue).
 - **Job 10 — Write AI Notes.** Including `Uncertain:` flags and `Possible Orbit miss:` tags as applicable.
 - **Job 11 — Emit Filtered signals trace.** For every signal the Output gating filter dropped, record source / summary / filter_reason / citations into the `filtered_signals` array. Writer renders this as a collapsible section on the Run Log detail page.
 - **Sort rule 0** surfaces priority-lane rows at the top of the queue, ahead of all other ordering heuristics.
+- **Sort rule 0.5** places due-today rows immediately below the priority-lane band, ahead of all non-dated rows. A row is in this band if it is a `pm_task_due_today` Flag OR any row with `row.due_today == true` (a task due today that also carried an actionable signal). The queue thus reads top-down as: AM-handed-due-today → other due-today → everything else. This is what lets the PM clear "what's due today" without opening Orbit.
 
 #### 4c. Write to Notion
 

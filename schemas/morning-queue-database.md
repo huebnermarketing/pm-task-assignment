@@ -41,7 +41,7 @@ The database has **10 columns total**. All 10 are visible in the default view, i
 | Editable by PM | Yes (PM can read and add their own notes; skill won't overwrite manual additions) |
 | Default value | Empty (only populated when there's something notable) |
 | Format | Plain text, multi-line OK. Notion truncates long text in table view; PM clicks into row to read full content. |
-| Common patterns | `Uncertain: I don't know if this email relates to Agency X's homepage or a new request.` <br> `<AM name> put this on your plate overnight, due today. Proposed delegate: Hitesh (history on project).` <br> `Possible Orbit miss: client delivery from jane@agencyx.com (reply to our request) with no corroborating Orbit task. Creating parent task on Agency X on your approval.` <br> `Possible Orbit miss: project resolved by search — you are not its owner/AM; confirm before approving.` <br> `Possible duplicate: #106447 'Homepage revisions' on Agency X may already cover this — reply 'create anyway' to add a new one.` <br> `Project not found: searched Orbit for jane@agencyx.com's client and "homepage revisions" — no match. Name the project to create it.` <br> `PM note changed assignee Vijay → Ravi. Honored.` <br> `New project — no task history. Pod inference based only on followers.` <br> `Gmail collector failed this morning — this row's source list is incomplete.` |
+| Common patterns | `Uncertain: I don't know if this email relates to Agency X's homepage or a new request.` <br> `<AM name> put this on your plate overnight, due today. Proposed delegate: Hitesh (history on project).` <br> `Due today. No new activity overnight — surfaced so it isn't missed. Subtask #112880 already open under Vijay Patel; informational unless stalled.` <br> `Possible Orbit miss: client delivery from jane@agencyx.com (reply to our request) with no corroborating Orbit task. Creating parent task on Agency X on your approval.` <br> `Possible Orbit miss: project resolved by search — you are not its owner/AM; confirm before approving.` <br> `Possible duplicate: #106447 'Homepage revisions' on Agency X may already cover this — reply 'create anyway' to add a new one.` <br> `Project not found: searched Orbit for jane@agencyx.com's client and "homepage revisions" — no match. Name the project to create it.` <br> `PM note changed assignee Vijay → Ravi. Honored.` <br> `New project — no task history. Pod inference based only on followers.` <br> `Gmail collector failed this morning — this row's source list is incomplete.` |
 | Recognized prefix tags | `Uncertain:` — matcher could not confidently group, classify, or pick an assignee; PM resolves manually. <br> `Possible Orbit miss:` — an unactioned client email (delivery reply, delivery-token, or issue/feature) with no corroborating Orbit task; row will create a parent Orbit task on PM approval (see `synthesis/matcher.md` Job 5 § Unactioned client signal → Create parent task). <br> `Possible duplicate:` — a topic-matching open task already exists on the resolved project; row is a Flag, PM reopens there or replies "create anyway". <br> `Project not found:` — the email's project could not be resolved from the workload map or Orbit search; row is a Flag, PM names the project for Mode 2 to create. |
 
 ### Column 3 — `Orbit Task Link`
@@ -354,6 +354,23 @@ When the schema needs to evolve (e.g., adding a column in a future version), use
 | Outcome | *(empty — Mode 2 does not execute Flag rows. PM marks Skip when resolved.)* |
 | PM Notes | *(empty)* |
 | Source Systems | `Gmail` |
+| Status | `Recommended Action` |
+
+## Sample row — Flag (due today, no new signal)
+
+A PM-owned task whose `due_date == today` that saw no overnight activity. Surfaces so the PM never has to open Orbit to see today's deadlines. `pm_task_due_today` signal, anchored on the `orbit_due_today` latest_signal, routed by the Job 5 due-today branch.
+
+| Column | Value |
+|---|---|
+| Summary | `Due today — Homepage revisions round 2 — Brightpath WP #16702` |
+| AI Notes | `Due today. No new activity overnight (no comment, status change, or client email since last run). Surfaced so it isn't missed. Subtask #112880 already open under Vijay Patel; informational, no action unless stalled.` |
+| Orbit Task Link | `https://app.whitelabeliq.com/93640173/project/.../112501` |
+| Project | `Brightpath WP (#16702)` |
+| Recommended Action | `Flag — due today. Review and delegate, progress, or close. No Mode 2 action.` |
+| Recommended Assignee | `— (PM action)` |
+| Outcome | *(empty — Mode 2 does not execute Flag rows. PM marks Skip when resolved.)* |
+| PM Notes | *(empty)* |
+| Source Systems | `Orbit` |
 | Status | `Recommended Action` |
 
 ## Sample row — Create parent task (Possible Orbit miss)

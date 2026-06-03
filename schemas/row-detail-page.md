@@ -69,12 +69,13 @@ The first line under the heading is the **Triggered-by line** — built from `ro
 **Triggered by:** <source label> — <author_name> @ <timestamp_local> — "<excerpt one-line>" [Open link](<source_url>)
 ```
 
-Source label per `anchor.source`: `orbit_comment` → `Orbit comment`, `orbit_task_body_update` → `Orbit task update`, `orbit_status_change` → `Orbit status change`, `orbit_due_date_change` → `Orbit due-date change`, `gmail_message` → `Gmail`, `fathom_meeting` → `Fathom meeting`.
+Source label per `anchor.source`: `orbit_comment` → `Orbit comment`, `orbit_task_body_update` → `Orbit task update`, `orbit_status_change` → `Orbit status change`, `orbit_due_date_change` → `Orbit due-date change`, `orbit_due_today` → `Orbit — due today`, `gmail_message` → `Gmail`, `fathom_meeting` → `Fathom meeting`.
 
 Examples:
 
 - `**Triggered by:** Orbit comment — Hitesh Asnani @ 28 May 2026, 5:42 AM IST — "Pushed the staging build, ready for QA." [Open in Orbit](...)`
 - `**Triggered by:** Gmail — Jane Miller @ 27 May 2026, 11:18 PM IST — "Per our call, the homepage revisions need to ship by Friday." [Open thread](...)`
+- `**Triggered by:** Orbit — due today — Vijay Patel @ 03 Jun 2026, 12:00 AM IST — "Due today (2026-06-03)." [Open in Orbit](...)` (a due-today Flag with no overnight activity; the anchor is the deadline itself)
 
 Below the Triggered-by line, the H1 Task Brief carries a 2–4 sentence paragraph composed by matcher Job 7b: what the work is about + the new update / latest signal that triggered this row. Pulls primarily from the most recent input source (top of email thread, latest Orbit comment, AM clarification) — not from the older parent-task description. The full Orbit task body / older context still lives in the 6-section Orbit body (further down on this page for Create subtask / Create parent task rows) and the Sources block (every row).
 

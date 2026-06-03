@@ -41,7 +41,7 @@ Every signal that cannot reduce to one of these five actions — AND that the PM
 The matcher checks the drop list BEFORE deciding Create-subtask vs Flag. If a signal matches a drop reason, no row is emitted; the signal goes to `filtered_signals`.
 
 - Hours-overrun alerts (`no-reply@whitelabeliq.com` notifications). Already surfaced by Orbit hours flow per PM feedback.
-- PM's own Orbit tasks due today / overdue / status changes that the PM will see in Orbit's own due-date UI.
+- PM's own Orbit **overdue** tasks / passive status changes that the PM will see in Orbit's own due-date UI. **Due-today tasks are NOT dropped** — under the single-pane mandate (the PM must not have to open Orbit to learn what's due today) every due-today task surfaces via the collector's `pm_task_due_today` signal and is routed by the Job 5 due-today branch (actionable verb if another signal exists on the task, else a `Flag`). Only `due_date < today` (overdue) and bare status changes remain dropped here.
 - Rollup digests aggregating stale tasks for PM review (PM scans Orbit directly).
 - Standup / Daily Status meeting recaps where every action item lands on someone else (no Orbit ownership change for the PM and no PM-action gap).
 - Asana / third-party SaaS automation emails (`no-reply@asana.com`, etc.) outside the closed allowlist.
@@ -59,7 +59,7 @@ For every signal that survives the static drop list, run a PM-action check befor
 3. If matching PM activity is found, drop the signal with `filter_reason: pm_already_handled`. Capture the PM-action timestamp + a one-line note in `filtered_signals` so the audit trail shows what was already resolved.
 4. If no matching PM activity, the signal is unhandled — proceed to Job 5 to decide Create-subtask vs Flag.
 
-**Bypass for priority-lane signals.** Signals carrying `bypass_pm_action_filter: true` (set by the Orbit collector's Priority Pass on `am_handed_to_pm_overnight_due_today` signals) are NOT subject to this filter. They proceed directly to Job 5 regardless of whether the PM commented on the parent task overnight. Rationale: an AM-handed task is pending delegation even if the PM acknowledged it ("got it, will look in the morning"); the delegation work itself hasn't happened. Acknowledgement ≠ handled for this signal class.
+**Bypass for priority-lane and due-today signals.** Signals carrying `bypass_pm_action_filter: true` are NOT subject to this filter — they proceed directly to Job 5 regardless of whether the PM commented on the task overnight. Two signal classes set this flag: (a) the Priority Pass's `am_handed_to_pm_overnight_due_today` signals, and (b) the normal pass's `pm_task_due_today` signals. Rationale: for (a), an AM-handed task is pending delegation even if the PM acknowledged it ("got it, will look in the morning") — the delegation work itself hasn't happened. For (b), a standing due date is a fact about the task, not a signal the PM "replied to"; a prior comment does not retire today's deadline, so the task must still surface. Acknowledgement ≠ handled for either class.
 
 This rule directly fixes the over-flagging observed in early runs. The PM action set (Sent emails, Orbit comments) IS the PM telling the system "I've already got this." The matcher must respect that signal — except where the priority-lane bypass overrides.
 
@@ -112,6 +112,7 @@ For priority-lane Orbit signals (`signal_type: am_handed_to_pm_overnight_due_tod
 A single issue may show up in both Gmail and Orbit. Matcher merges them into one item.
 
 Match signals as the same item when:
+- **Two Orbit signals carry the same `task_id`** — always the same item, merge unconditionally (no topic/window test needed). This is the rule the Job 5 due-today branch relies on: a `pm_task_due_today` signal and an `activity_log` / `new_comment` / `status_change` signal on the same task collapse into ONE row. The actionable signal supplies the verb; the due-today signal contributes only `row.due_today = true`. One task → one row.
 - Same project AND same topic/deliverable (keyword overlap in content)
 - Same actors involved AND signals fall within the same ~24-hour window
 - One signal explicitly cites the other (e.g., Orbit comment quotes an email subject)
@@ -227,6 +228,9 @@ The action set is closed: `Create subtask`, `Reopen subtask`, `Hand off parent t
 
 1. **Run Job 5a — work-type classifier.** Classify the signal into one of: `HTML_CSS | PHP_BACKEND | QA | AUDIT | QUOTE | SEO | DESIGN | CONTENT | BA | OTHER`. Job 5a output (`row.work_type`) drives both this Job 5 verb pick AND Job 6 pod-boundary routing.
 2. **Priority-lane override (still applies).** If the signal carries `signal_type: am_handed_to_pm_overnight_due_today`, the parent is pinned to `signal.parent_task_id`. Action defaults to `Create subtask` (or `Reopen subtask` after Job 5.5 check). Never `Flag`.
+2.5. **Due-today branch.** If the signal carries `signal_type: pm_task_due_today`, first merge by `task_id` against every other signal surfaced this run (Job 2 dedup, keyed on `task_id` for Orbit signals):
+    - **Another signal exists on the same task** (new comment, status change, attached Gmail ask, or — handled above — an AM handoff). That signal's verb wins; the standalone due-today signal is consumed, NOT emitted as its own row. Set `row.due_today = true` so Job 10 prepends `Due today.` to AI Notes and Sort rule 0.5 lifts the row into the due-today band. One task → one row.
+    - **due-today is the only signal on the task** → emit a `Flag` row. Anchor = the `orbit_due_today` `latest_signal` from the collector. `pm_next_step = "Due today — review and delegate, progress, or close."` The row carries **no proposed Orbit body, no recommended assignee (`— (PM action)`), and no handoff** — it stays a Flag; the skill does not invent work for a task with no new ask. **BUT this Flag is the one Flag class that fires a *light* deep-read** (see Job 7 § Light deep-read for due-today Flags): `get_task_details(task_id)` + the newest page of `list_task_comments(task_id)` (most-recent comments only, NOT the full all-time history) so Job 7b can compose a "here's where this stands" task_brief and surface the open-subtask status — letting the PM decide inside Notion without opening Orbit (the single-pane mandate). If the cached/fetched `subtasks[]` shows an open subtask already under this task, the brief notes `subtask #<id> open under <assignee> — likely needs your review, not re-delegation.` and AI Notes carries `Due today — subtask #<id> already open under <assignee>; informational, no action needed unless it's stalled.` This Flag is exempt from the "PM will see it in Orbit's UI" drop (Output gating) — that exemption is the whole point of the change.
 3. **Flag the PM-owned moves first.** If the next move is PM-owned (reply to an AM, decide a scope question, brief the team for a meeting), choose `Flag` regardless of work_type. Examples: "Ellen needs dev names for the 27 May Joe Warner call", "FTP credentials still missing — PM decides whether to chase client directly".
 4. **Unactioned client signal check (Possible Orbit miss).** Before defaulting a Gmail-only signal to a workshop verb, run the "Unactioned client signal → Create parent task" detection below. If the entry gate + any one of the three trigger sub-classes (S1a/S1b/S2) fire, run project resolution + dedup: a resolved, non-duplicate project → `Create parent task`; project not found or a topic-matching open task already exists → `Flag` with the corresponding `pm_next_step`.
 5. **Work-type → verb branch.** For signals that are dev-shaped work (not PM-owned, not Possible Orbit miss), the verb depends on `work_type`:
@@ -498,9 +502,18 @@ For every task that becomes a Create-subtask or Create-parent-task row, the matc
 1. **`get_task_details(task_id)`** — full task body / description / all fields. Default-on, NOT conditional on whether the workload returned a description. The workload's truncation behavior is opaque; trust nothing about completeness.
 2. **`list_task_comments(task_id)`** — full all-time comment history, NOT date-filtered to `last_run_timestamp`. This is the load-bearing call for tasks with long prior conversation. The `get_activity_log` call already pulled in Step 1e covers only the deltas since last_run; the deep comment history (decisions, prior client feedback, AM clarifications, failed attempts, scope changes) lives in older comments that activity_log didn't surface.
 
-These calls fire during Job 7 composition (per-row, on the survivor set after Job 5 — typically 10-30 rows, not the full 30-80 workload size). They are mandatory for the row classes that produce an Orbit body; Flag rows skip these calls since Flag rows don't produce a body.
+These calls fire during Job 7 composition (per-row, on the survivor set after Job 5 — typically 10-30 rows, not the full 30-80 workload size). They are mandatory for the row classes that produce an Orbit body. **Flag rows skip these calls — with ONE exception: `pm_task_due_today` bare Flags fire a *light* deep-read** (details + newest comments only, no full history, no body). See § Light deep-read for due-today Flags below.
 
-**Issuance — parallel batch, not serial per-row.** After Job 5 filtering, collect the survivor set `S = { rows where action ∈ {Create subtask, Create parent task} }`. Then fan out the deep-read in a single LLM-turn batch:
+#### Light deep-read for due-today Flags
+
+A bare `pm_task_due_today` Flag (a task due today with no other signal) does NOT compose a 6-section body, so it does not need the full all-time comment history. But under the single-pane mandate the PM should be able to decide what to do with it **without opening Orbit** — which requires knowing where the task currently stands. So this Flag class fires a trimmed two-call read:
+
+1. **`get_task_details(task_id)`** — current body / status / severity / `subtasks[]`. Same call as the full deep-read.
+2. **`list_task_comments(task_id)` — newest page only** (most-recent comments, the collector's descending-sorted first page; NOT paginated back through the full all-time history). Enough to answer "what's the latest on this task?" without the cost of deep history.
+
+Outputs feed exactly two things: (a) the Job 7b `task_brief` ("here's where this stands" — latest comment + open-subtask status), and (b) the open-subtask annotation in AI Notes. **No 6-section body, no assignee recommendation (Job 6 is skipped — `recommended_assignee = "— (PM action)"`), no handoff (Job 8 skipped).** If both calls fail after retries, the row still ships as a Flag with the bare `orbit_due_today` anchor and AI Note `Due today — could not load task context this morning; open in Orbit to review.` — the deadline visibility is never lost.
+
+**Issuance — parallel batch, not serial per-row.** After Job 5 filtering, collect the survivor set `S = { rows where action ∈ {Create subtask, Create parent task} } ∪ { pm_task_due_today bare Flags }`. The first two classes get the full two-call deep-read; due-today Flags get the light read (details + newest-page comments) but issue in the SAME batch and count against the same per-turn cap. Then fan out the deep-read in a single LLM-turn batch:
 
 - Issue `get_task_details(task_id)` and `list_task_comments(task_id)` for EVERY row in S as parallel tool calls in one turn (Claude Code supports multi-tool-use per turn).
 - **Batch cap: 25 parallel tool calls per turn.** If `|S| × 2 > 25` (i.e., S > 12 rows), chunk the survivor set: first batch covers rows 1–12 (24 calls), second batch covers rows 13–24, etc. Chunk boundaries are arbitrary — order within S does not affect Job 7 composition since each row composes independently.
@@ -543,7 +556,7 @@ After all deep-reads land, Job 7 selects `row.latest_signal_anchor` as the newes
 
 ```
 row.latest_signal_anchor = {
-  source: "orbit_comment" | "orbit_task_body_update" | "orbit_status_change" | "orbit_due_date_change" | "gmail_message" | "fathom_meeting",
+  source: "orbit_comment" | "orbit_task_body_update" | "orbit_status_change" | "orbit_due_date_change" | "orbit_due_today" | "gmail_message" | "fathom_meeting",
   id: <int or string>,
   timestamp_iso: <ISO 8601>,
   author_name: <string>,
@@ -564,7 +577,7 @@ If no input source carries a signal (rare — a row with no trigger), drop to `f
 
 **Create parent task path** — pre-write the full 6-section task body per `schemas/orbit-dq-standard.md`. Same plain-language rules and same mandatory email-enrichment rules as Create subtask. The body cites the originating Gmail signal explicitly in the REFS section (sender, subject, thread URL) so the audit trail is clear when the PM (or someone reviewing later) opens the Orbit task. The originating Gmail thread for a Possible-Orbit-miss row IS the primary source — read its full depth.
 
-**Flag path** — does NOT carry a `proposed_orbit_body`. No Orbit write happens for a Flag row. Job 7 is skipped for Flag rows entirely. The row's detail page substitutes `Proposed Orbit Task Body` with `PM next step` (rendered from the `pm_next_step` clause set in Job 5). However, the row detail Sources section still renders all attached `context_signals[]` and `enrichment.fathom` so the PM can scan the email/meeting context while deciding their next move.
+**Flag path** — does NOT carry a `proposed_orbit_body`. No Orbit write happens for a Flag row. Job 7 body composition is skipped for Flag rows entirely (and Job 6 assignee + Job 8 handoff too). The row's detail page substitutes `Proposed Orbit Task Body` with `PM next step` (rendered from the `pm_next_step` clause set in Job 5). The row detail Sources section still renders all attached `context_signals[]` and `enrichment.fathom` so the PM can scan the email/meeting context while deciding their next move. **Exception — `pm_task_due_today` bare Flags:** Job 7's *light* deep-read still fires (details + newest comments) to feed the Job 7b `task_brief` and the open-subtask annotation; body composition, assignee, and handoff remain skipped. See § Light deep-read for due-today Flags.
 
 ### Job 7b — Compose the row's Task Brief
 
@@ -578,6 +591,7 @@ Composition rules:
 - **Anchor on the deliverable when possible.** Lead with one sentence describing what the work IS (mirrors the Summary topic), then 1–3 sentences with the new signal's content.
 - **Cite the trigger inline.** When a specific message / comment is the trigger, identify it briefly (e.g. "Pravin commented on the parent at 12:40 IST today, confirming the 4 new pages should mirror the existing parent/child pattern.").
 - **For `Flag` rows:** the brief becomes a 2–3 sentence "here's what came in" summary of the signal the PM needs to react to.
+- **For `pm_task_due_today` bare Flags:** the brief is a 2–3 sentence "here's where this stands" status, composed from the light deep-read (most-recent comment + open-subtask status from `subtasks[]`), NOT the bare due-date. Lead with what the task is, then the latest movement, then the open-subtask hint so the PM can triage in Notion. Example: `Homepage revisions round 2, due today. Latest: Vijay pushed the staging build 2 days ago, awaiting your QA sign-off. Subtask #112880 open under Vijay — likely needs your review, not re-delegation.` If the light read failed, fall back to `<task title>, due today. Could not load latest context this morning — open in Orbit to review.`
 - **For `Hand off parent task` rows:** the brief explains why this work is being handed off to the pool leader rather than kept in-pod (e.g. "This is a quote / SEO audit / design ask — handed to the Quoting / Marketing-SEO / Design pool lead per the work-type routing rules.").
 - **Length cap: 600 chars.** Notion truncates aggressively in row preview; the brief is a quick read on the detail page, not a placeholder for the Orbit body.
 

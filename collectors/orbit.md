@@ -155,7 +155,7 @@ For each task in the workload response:
 3. **New comments** — from activity log entries with `type: comment` on this task ID. Especially ones mentioning the PM (@ in comment content).
 4. **Status changes that matter** — any task where status moved into `Waiting for Feedback`, `Client Review`, `Blocked`, or `Done` since last run.
 5. **Overdue flag** — tasks where `due_date < today (IST)` AND status is not `Done` get an `overdue_task` signal type.
-6. **Today's-due flag** — tasks where `due_date == today (IST)` AND status is not `Done` AND not already in `priority_signals[]` (the priority pass takes precedence). Used by sort rule heuristics, not as a standalone signal.
+6. **Today's-due signal** — tasks where `due_date == today (IST)` AND status is not `Done` AND not already in `priority_signals[]` (the priority pass takes precedence) emit a standalone `pm_task_due_today` signal. **First-class signal, not just a sort heuristic** — the single-pane mandate (the PM should never have to open Orbit to learn what's due today) requires every due-today task to surface even when nothing changed overnight. The signal carries `bypass_pm_action_filter: true` (a standing due date is not "handled" by a prior PM comment) and an `orbit_due_today` anchor (see § Per-task `latest_signal`). The matcher merges this signal by `task_id` with any other signal on the same task: if an actionable signal (new comment / Gmail ask / status change) also exists, that verb wins and due-today rides along as an AI-Notes annotation; if this is the only signal on the task, the matcher emits a `Flag` row anchored on the due date (matcher Job 5 due-today branch). Overdue tasks (item 5) and passive status changes are NOT promoted this way — they remain matcher drop-list candidates per the explicit scope decision (due-today only).
 7. **New attachments** — flagged by activity log on the task; pull filename + download URL via `get_asset_attachment_summary_with_download_url` if PM may need to review.
 
 ## What to skip
@@ -193,14 +193,15 @@ Selection rule for `latest_signal`. Compute across these candidate sources for t
 2. **`orbit_task_body_update`** — the task's own `updated_at` if it postdates every comment AND the corresponding activity_log entry on this task surfaces a `field_change` event affecting `title`, `description`, `due_date`, or `severity`. Source id = task_id, author = the actor that performed the update (from activity_log), excerpt = the field-change description or the first 240 chars of the body if a body update.
 3. **`orbit_status_change`** — newest activity_log `status_change` event on this task. Source id = activity_log entry id (or task_id if entry id absent), author = the actor, excerpt = `"<from_status> → <to_status>"`.
 4. **`orbit_due_date_change`** — newest activity_log `due_date_change` event on this task. Same shape as status_change; excerpt = `"<from_date> → <to_date>"`.
+5. **`orbit_due_today`** — synthetic anchor for a task whose `due_date == today (IST)` (the `pm_task_due_today` signal, item 6 above). Source id = task_id, author = the task's assignee (the PM), excerpt = `"Due today (<due_date>)"`. **Timestamp = today 00:00 IST** — deliberately the start of the day so any *real* same-day event (a comment posted at 07:00, a status flip) outranks it and keeps the row actionable; this anchor only wins when nothing else happened on the task, producing a bare due-today `Flag`. Emitted only when item 6's conditions hold.
 
-Tiebreaker: if two candidates share an identical timestamp, pick in the priority order above (1 > 2 > 3 > 4 — comments win over body updates win over status changes win over due-date changes). Excerpt strips HTML tags, collapses whitespace, and caps at 240 chars.
+Tiebreaker: if two candidates share an identical timestamp, pick in the priority order above (1 > 2 > 3 > 4 > 5 — comments win over body updates win over status changes win over due-date changes win over the bare due-today anchor). Excerpt strips HTML tags, collapses whitespace, and caps at 240 chars.
 
 The `latest_signal` field lives on every task entry in the relationship map regardless of whether the task surfaces as a queue row. The matcher reads it during Job 7 to anchor the row. Shape:
 
 ```
 latest_signal: {
-  source: "orbit_comment" | "orbit_task_body_update" | "orbit_status_change" | "orbit_due_date_change",
+  source: "orbit_comment" | "orbit_task_body_update" | "orbit_status_change" | "orbit_due_date_change" | "orbit_due_today",
   id: <int — comment id, activity_log entry id, or task_id depending on source>,
   timestamp_iso: <ISO 8601>,
   author_id: <int>,
@@ -215,7 +216,7 @@ If the task has zero comments AND no activity_log events AND no body updates sin
 
 The collection-phase calls above return the universe + the deltas since `last_run_timestamp`, which is enough for the matcher to decide which tasks become rows. But composing the proposed 6-section body for a row requires **deeper context than the workload snapshot or the activity-log delta provides** — specifically, the full task description and the complete comment history (including comments older than `last_run_timestamp`).
 
-For every task that becomes a `Create subtask` or `Create parent task` row (typically 10-30 rows per morning), the matcher's Job 7 lazily fires:
+For every task that becomes a `Create subtask` or `Create parent task` row (typically 10-30 rows per morning), the matcher's Job 7 lazily fires the full two-call deep-read below. **`pm_task_due_today` bare Flags fire a *lighter* variant** — `get_task_details` + the newest page of `list_task_comments` only (no full all-time history), used solely to compose the row's task_brief and open-subtask note (see `synthesis/matcher.md` Job 7 § Light deep-read for due-today Flags). The full read:
 
 1. **`get_task_details(task_id)`** — full task body, description, all fields. Default-on, NOT gated on whether the workload returned a description. The workload's truncation behavior is opaque; trust nothing about completeness.
 2. **`list_task_comments(task_id)`** — full all-time comment history, NOT date-filtered to `last_run_timestamp`. The collection-phase `get_activity_log` returns deltas since last_run only; older decisions, prior client feedback, AM clarifications, failed attempts, scope changes live in comments from earlier weeks/months that the activity log won't surface.
@@ -226,7 +227,7 @@ For every task that becomes a `Create subtask` or `Create parent task` row (typi
 
 **Mandatory, not conditional.** Same default-on rule as the Gmail-thread enrichment (see `synthesis/matcher.md` Job 7 § Mandatory email-thread enrichment): do NOT skip these calls because the workload snapshot or the Orbit task title looks "complete enough". The runtime cannot judge completeness without reading; reading first is the only way to know.
 
-**Flag rows skip these calls.** Flag rows do not produce an Orbit body (per matcher Job 7 § Flag path), so the per-row deep-read does not fire. The PM resolves Flag rows manually — they have the Orbit task URL in the row's `orbit_task_link` column and can click through to see comment history themselves.
+**Flag rows skip these calls — except `pm_task_due_today` bare Flags.** Ordinary Flag rows do not produce an Orbit body (per matcher Job 7 § Flag path), so the full per-row deep-read does not fire; the PM resolves them manually via the Orbit task URL in the row's `orbit_task_link` column. The one exception is a `pm_task_due_today` bare Flag: it fires the *light* read (`get_task_details` + newest-page `list_task_comments`, no full history) so its task_brief can tell the PM where the task stands without opening Orbit (matcher Job 7 § Light deep-read for due-today Flags). Still no body, no assignee, no handoff.
 
 ## Output shape — per signal
 
@@ -235,7 +236,8 @@ Each signal is a structured record:
 ```
 {
   "source": "orbit",
-  "signal_type": "activity_log_entry" | "overdue_task" | "new_task" | "status_change" | "new_comment" | "new_attachment",
+  "signal_type": "activity_log_entry" | "overdue_task" | "new_task" | "status_change" | "new_comment" | "new_attachment" | "pm_task_due_today",
+  "bypass_pm_action_filter": <bool — true only on pm_task_due_today signals (and priority-pass signals); absent/false otherwise>,
   "project_id": <int>,
   "project_title": <string>,
   "project_url": <string>,
@@ -302,7 +304,7 @@ Structure:
           "due_date": <ISO date or null>,
           "is_pm_owned": <bool — assignee_id == PM_user_id at collection time>,
           "latest_signal": {
-            "source": <"orbit_comment" | "orbit_task_body_update" | "orbit_status_change" | "orbit_due_date_change">,
+            "source": <"orbit_comment" | "orbit_task_body_update" | "orbit_status_change" | "orbit_due_date_change" | "orbit_due_today">,
             "id": <int>,
             "timestamp_iso": <ISO 8601>,
             "author_id": <int>,
