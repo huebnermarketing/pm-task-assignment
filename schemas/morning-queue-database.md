@@ -368,8 +368,8 @@ A PM-owned task whose `due_date == today` that saw no overnight activity. Surfac
 | Project | `Brightpath WP (#16702)` |
 | Recommended Action | `Flag — due today. Review and delegate, progress, or close. No Mode 2 action.` |
 | Recommended Assignee | `— (PM action)` |
-| Outcome | *(empty — Mode 2 does not execute Flag rows. PM marks Skip when resolved.)* |
-| PM Notes | *(empty)* |
+| Outcome | *(empty — Mode 2 skips this unless the PM note delegates. If PM writes e.g. `hand to FE pod`, Mode 2 promotes it to Create subtask and Outcome becomes `Subtask #... created under #112501 → assigned to Vijay`.)* |
+| PM Notes | *(empty by default. To delegate from the queue: `delegate to Vijay` / `hand to FE pod` → promotes Flag → Create subtask in Mode 2.)* |
 | Source Systems | `Orbit` |
 | Status | `Recommended Action` |
 

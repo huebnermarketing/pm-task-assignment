@@ -111,6 +111,44 @@ On success, emit:
 
 If the named project can't be resolved: `confidence: low`, `clarification_needed: "Which project? I couldn't find '<name>' in Orbit."` See `executors/orbit.md` § Create a parent task for the create_task call.
 
+### "delegate to X" / "hand to <pod>" / "give this to <dev>" / "needs a dev" (Delegate a due-today Flag)
+
+**Entry condition — narrow.** This promotion fires ONLY when the row verb is `Flag` AND the row's signal is `pm_task_due_today` (a bare due-today Flag — a task due today that the PM has now decided needs delegating). This is one of only two verb-changing promotions allowed (the other is the Possible-Orbit-miss create path above). For any other Flag class, a delegation note does NOT change the verb — return `confidence: low`, `clarification_needed: "This row is flagged for your own action; I can't auto-delegate it. If you want a sub-task, tell me the project and pod."`
+
+When the entry condition holds and the note expresses delegation intent, resolve it like the matcher would have if there had been a real ask:
+
+1. **Upgrade the light read to a full deep-read.** The Mode-1 light read only fetched newest comments. Now fire `get_task_details(task_id)` + the FULL `list_task_comments(task_id)` (all-time history) so the sub-task body carries complete context. Attach any `context_signals[]` / Fathom already on the row (usually none for a bare due-today task).
+2. **Classify work_type** (matcher Job 5a) from the task body + comments + **the PM note itself** (the note often names the work or pod — `hand to FE` → `HTML_CSS`, `QA this` → `QA`, `needs a quote` → `QUOTE`).
+3. **Pick the verb** via the Job 5 work-type → verb table: pod work (`HTML_CSS` / `PHP_BACKEND` / `QA`) → `Create subtask` under the due-today task (it is the PM-owned parent, so `parent_id = task_id`); non-pod work (`AUDIT` / `QUOTE` / `SEO` / `DESIGN` / `CONTENT` / `BA`) → `Hand off parent task` (reassign the task itself to the pool lead).
+4. **Existing-subtask check** (matcher Job 5.5): if an open subtask of the matching work_type already sits under the task (from the deep-read `subtasks[]`), emit `Reopen subtask` instead of a duplicate — reassign to the PM-named dev, else the last non-PM commenter; inactive dev → clarification.
+5. **Resolve the assignee.** PM named a specific dev → honor it (look up via `pod-inference.md`; ambiguous or inactive → clarification, same rule as "assign to X"). No name (generic `delegate this` / `needs a dev`) → run the Job 6 pod-boundary tree; if it lands on `Uncertain`, return `confidence: low`, `clarification_needed: "Which pod or person should own <task>? I can delegate but couldn't infer it from the note."` — never guess a delegate.
+6. **Compose the 6-section body** (matcher Job 7) from the full deep-read.
+
+On success, emit the executor action for the resolved verb (`create_subtask`, or `update_task` + `add_comment` for `Reopen subtask` / `Hand off parent task` per `executors/orbit.md`), plus a `regenerate_handoff` action so a fresh handoff draft is appended under the row Outcome. Example (pod work, named dev):
+
+```
+{
+  "action_plan": [
+    {
+      "type": "create_subtask",
+      "executor": "orbit",
+      "parameters": { "parent_id": <due-today task_id>, "assignee": <Vijay's user ID>, "description": "<6-section body from full deep-read>", "work_type": "HTML_CSS" },
+      "why": "PM delegated this quiet due-today task to the FE pod per note 'hand to FE'; promoted Flag → Create subtask."
+    },
+    {
+      "type": "regenerate_handoff",
+      "executor": "notion",
+      "parameters": { "to": "Vijay", "message": "<plain-language handoff>" },
+      "why": "Handoff draft for the promoted sub-task, appended under the row Outcome for the PM to copy + send."
+    }
+  ],
+  "confidence": "high",
+  "clarification_needed": null
+}
+```
+
+If the note is delegation-shaped but the work_type cannot be inferred AND no dev/pod is named → `confidence: low`, `clarification_needed: "I can delegate <task>, but tell me the pod or person — I couldn't tell from 'delegate this' what kind of work it is."`
+
 ### "CC [person]" / "add [person] as CC" / "include [person]"
 
 - For email actions: add the person to CC
