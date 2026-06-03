@@ -130,9 +130,9 @@ This note is included in the summary section at the top of the dated page.
 
 #### 2b. Possible-Orbit-miss safety-net (cross-reference to matcher)
 
-The matcher (`synthesis/matcher.md` Job 5 § Possible Orbit miss detection) inspects every Gmail signal for the following pattern: empty `context_signals[]` after Job 4b Pass 1 AND no PM-owned Orbit task on candidate projects AND critical-language tokens (`urgent`, `asap`, `today`, `eod`, `blocker`, `escalation`, etc.) AND external sender. When all four hold and project resolution is unambiguous, the matcher emits a `Create parent task` row tagged `Possible Orbit miss:` — Mode 2 will create a parent Orbit task on the resolved project assigned to the PM on approval.
+The matcher (`synthesis/matcher.md` Job 5 § Unactioned client signal → Create parent task) inspects every Gmail signal for an unactioned client email that should have become an Orbit task: empty `context_signals[]` after Job 4b Pass 1 AND no PM action on the thread AND external sender, plus any one of three trigger sub-classes — S1a (client reply delivering something WLIQ asked for), S1b (delivery tokens: "here is / as requested / attached"), or S2 (issue / error / feature-request mail, the original critical-language class). It then resolves the project (workload map → lazy Orbit search) and dedup-checks it: resolved, non-duplicate → `Create parent task` tagged `Possible Orbit miss:`; project not found or a topic-matching open task already exists → `Flag` for the PM. Mode 2 creates the parent on approval (or after the PM names the project).
 
-This detection is executed inside the matcher (Step 4), not by the Gmail collector. Documented here under Step 2 as a cross-reference for the PM mental model: pulling mail also serves as the safety net that catches critical items the PM may have missed on the Orbit side.
+This detection is executed inside the matcher (Step 4), not by the Gmail collector. Documented here under Step 2 as a cross-reference for the PM mental model: pulling mail also serves as the safety net that catches items the PM may have missed on the Orbit side — including deliveries the client returned that nobody turned into a task.
 
 ### Step 3 — Enrich with Fathom (lazy, on-demand)
 

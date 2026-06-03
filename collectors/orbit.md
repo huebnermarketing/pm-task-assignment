@@ -21,7 +21,7 @@ Orbit has a direct user-scoped workload API: `get_user_workload(user_id, is_comp
 
 **The universe of interest = `get_user_workload(PM_user_id, is_completed=incomplete, per_page=500)`.** Every primary collection signal flows from this set, with `get_activity_log` providing the change history for tasks in the set since `last_run_timestamp`.
 
-Tasks the PM follows but is NOT assigned to are intentionally out of scope here — if a follower-only task needs PM input, that ask reliably surfaces through Gmail (the AM emails the PM) and is captured by `collectors/gmail.md`. The morning queue is about the PM's own todos plus the items the PM hasn't yet acknowledged; Gmail is the safety net for everything outside the PM's direct task list (per Mode 1 Step 2 § Role of Gmail and matcher Job 5 § Possible Orbit miss detection).
+Tasks the PM follows but is NOT assigned to are intentionally out of scope here — if a follower-only task needs PM input, that ask reliably surfaces through Gmail (the AM emails the PM) and is captured by `collectors/gmail.md`. The morning queue is about the PM's own todos plus the items the PM hasn't yet acknowledged; Gmail is the safety net for everything outside the PM's direct task list (per Mode 1 Step 2 § Role of Gmail and matcher Job 5 § Unactioned client signal → Create parent task).
 
 ## Priority Pass (Mode 1 sub-step 1d — local filter, no MCP calls of its own)
 
@@ -328,7 +328,7 @@ It serves three downstream needs:
 2. `synthesis/matcher.md` — composing the row's `orbit_task_link` column by looking up the parent task's `url` by `parent_task_id` when the signal itself doesn't carry the parent URL.
 3. `synthesis/pod-inference.md` — computing `has_history_on_project` for candidate assignees. Note: under the user-scoped universe, the relationship map's project list is bounded by projects where the PM has at least one assigned open task. Projects where the PM is a follower-only contribute to history scoring only through Gmail-routed signals (no Orbit follower-only signal reaches this map).
 
-This map is used by `synthesis/matcher.md` to take a signal from Gmail (e.g., "email from jane@agencyx.com") and figure out it's about project 8426 because Agency X is the client for that project and Jane is a client contact. The candidate project must still appear in the map (i.e., PM has at least one open task there) for the routing to work — Gmail-only signals about projects with NO PM-assigned task become Possible-Orbit-miss candidates per matcher Job 5 § Possible Orbit miss detection.
+This map is used by `synthesis/matcher.md` to take a signal from Gmail (e.g., "email from jane@agencyx.com") and figure out it's about project 8426 because Agency X is the client for that project and Jane is a client contact. When the candidate project is NOT in the map (the PM has no open task there), the matcher does not give up — it resolves the project via lazy Orbit search (`list_clients` / `list_projects` / `get_client_details`) per matcher Job 5 § Unactioned client signal → Create parent task; only when search also fails does the signal become a project-not-found Flag for the PM.
 
 It's also used by `synthesis/pod-inference.md` to compute candidate assignees per project that appears in the map.
 
@@ -347,10 +347,13 @@ Use the following Orbit MCP tools (the `mcp__...orbit.` prefix matches whichever
 - `mcp__...orbit.list_clients`, `mcp__...orbit.list_sub_clients` — for client/sub-client enrichment in the relationship map.
 - `mcp__...orbit.list_users` — for matrix-name → user_id resolution + AM identity resolution in the priority pass. Called once per Mode 1 run by `references/pod-matrix.md`; the user list is cached for the duration of the run.
 
-**Removed from the mandatory sequence (no longer called during normal collection):**
-- `mcp__...orbit.list_projects` — was used to enumerate the PM's project universe; replaced by user-centric workload discovery. Remains available if a downstream component genuinely needs the PM's owned-project list, but the collector itself does not call it.
-- `mcp__...orbit.get_project_task_list` — was used to iterate per-project task lists; replaced entirely by `get_user_workload(PM)`. Not called during normal collection.
-- `mcp__...orbit.get_project_details` — was used for per-project metadata; project info now comes inline with each task in the workload response.
+**Not part of the standing relationship-map build — but called LAZILY by the matcher for off-workload project resolution + dedup** (`synthesis/matcher.md` § "Unactioned client signal → Create parent task"). These fire only when a Possible-Orbit-miss Gmail signal resolves to no project in the PM's workload map — a low-volume escalation, not part of normal collection:
+- `mcp__...orbit.list_clients(search_value=…)` / `mcp__...orbit.get_client_details(company_name=… | client_id=…)` — resolve the sender's CLIENT (id, AM, `contact_people` emails, `website_link` domain) when the workload map has no candidate. Note: `get_client_details` returns project *counts*, not the project list.
+- `mcp__...orbit.list_projects(client_id=… | search_value=…)` — the client's actual project list (each with `id`, `title`, `project_number`, `owner_id`, `account_manager_id`) for topic disambiguation; or search projects by name/number directly.
+- `mcp__...orbit.get_project_task_list(project_id, search=…, is_completed="incomplete")` — dedup check ("if not already") before proposing a new parent on the resolved project.
+- `mcp__...orbit.get_project_details(project_id)` — fetch `project_number` (and follower/owner info) for a search-resolved project so it renders correctly; also the standing lazy `project_number` enrichment for workload projects.
+
+All four are read-only and auto-`allow`; `create_task` (the only write in this flow) stays `ask`-gated and runs in Mode 2 after PM approval.
 
 ## Performance
 

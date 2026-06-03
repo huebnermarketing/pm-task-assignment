@@ -29,7 +29,7 @@ A revised action plan:
 {
   "action_plan": [
     {
-      "type": "create_subtask" | "update_task" | "add_comment" | "change_due_date" | "regenerate_handoff" | "skip",
+      "type": "create_subtask" | "create_parent_task" | "update_task" | "add_comment" | "change_due_date" | "regenerate_handoff" | "skip",
       "executor": "orbit" | "email" | "notion" | "none",
       "parameters": { ... },
       "why": <string — one-line justification tied to the note>
@@ -83,6 +83,33 @@ If `confidence = low`, the executors do NOT run. Instead, the row's Outcome colu
 - Regenerate the proposed Orbit task body with Y's context
 - Execute against Y instead of X
 - Log: `Re-scoped to Project Y per your note.`
+
+### "create it on [project / #number / client]" / "create anyway" / "new task on [X]"
+
+Resolves a Possible-Orbit-miss **Flag** row (project not found, or duplicate-suspected) into an actual parent-task creation. Two entry shapes:
+
+- **Project named** (`create it on Agency X` / `new task on #16915` / `create under Boyar Miller`) — resolve the named project:
+  - First the Orbit relationship map. If absent, `list_projects(search_value=<name/number>)` and/or `list_clients(search_value=<name>)` → `get_client_details(company_name=<name>, include_projects_summary=true)`. Pick the single match.
+  - Then run the dedup check `get_project_task_list(project_id, search=<topic keywords>, is_completed="incomplete")` UNLESS the note also says "anyway" (PM has overridden dedup). If a topic match still exists and the PM did not say "anyway", set `confidence: low`, `clarification_needed: "#<id> '<title>' on <project> may already cover this — reply 'create anyway' to add a new task."`
+- **"create anyway"** on a duplicate Flag (the row already names the resolved project in its context) — skip dedup, use the row's resolved `project_id`.
+
+On success, emit:
+```
+{
+  "type": "create_parent_task",
+  "executor": "orbit",
+  "parameters": {
+    "project_id": <resolved>,
+    "title": <row.task_title, or regenerated from the signal subject>,
+    "description": <row.proposed_orbit_body, regenerated for the resolved project if the project changed>,
+    "assignee": <PM_user_id>,
+    "parent_id": null
+  },
+  "why": "PM directed parent-task creation on <project> per note."
+}
+```
+
+If the named project can't be resolved: `confidence: low`, `clarification_needed: "Which project? I couldn't find '<name>' in Orbit."` See `executors/orbit.md` § Create a parent task for the create_task call.
 
 ### "CC [person]" / "add [person] as CC" / "include [person]"
 

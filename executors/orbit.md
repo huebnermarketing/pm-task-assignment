@@ -80,12 +80,14 @@ Edge cases:
 
 ### Create a parent task (Possible Orbit miss path)
 
-Triggered by rows whose `recommended_action` matches `Create parent task on <project> assigned to you` — i.e., `Create parent task` verb rows emitted by `synthesis/matcher.md` Job 5's Possible-Orbit-miss detection. These rows surface a Gmail-only critical-language signal that had no corroborating Orbit task; on PM approval, this executor creates the missing parent.
+Triggered by either:
+- a `Create parent task` verb row (`recommended_action` matches `Create parent task on <project> assigned to you`), emitted by `synthesis/matcher.md` Job 5's "Unactioned client signal" detection — a client email (a delivery reply S1a, delivery-token mail S1b, or issue/feature mail S2) that had no corroborating Orbit task and passed dedup. The project may have come from the PM's workload map OR from the matcher's lazy Orbit search (any owner — not necessarily the PM's project); on PM approval this executor creates the missing parent.
+- a `create_parent_task` action from `synthesis/note-interpreter.md` (PM resolved a not-found / duplicate Flag with a "create it on <project> / create anyway" note). Same create_task call; `project_id`, `title`, `description` come from the action's `parameters`.
 
 Use `mcp__...orbit.create_task`.
 
 Required parameters:
-- `project_id` — `row.project_id` (resolved by the matcher; row will not have reached this path if project was ambiguous — see the matcher's project-uncertainty rule)
+- `project_id` — `row.project_id` (matcher path) OR the note-interpreter action's `parameters.project_id` (PM-directed path). The row will not have reached the matcher path with a null project — see the matcher's resolution rule (not-found → Flag, never `Create parent task`).
 - `title` — `row.task_title` (already plain-language per the matcher's title-generation rules)
 - `description` — `row.proposed_orbit_body`, the 6-section body. REFS section cites the originating Gmail thread by sender, subject, and thread URL — that citation is the entire basis for this parent's existence, so it must be present.
 - `assignee` — PM's Orbit user ID. Parent goes on the PM's plate so future sub-tasks can nest under it via the standard `Create subtask` path in later runs.
@@ -113,7 +115,7 @@ If the matcher set a due date, append: ` Due <YYYY-MM-DD>.`
 **Source Systems multi-select on the row.** Add `Orbit` to the multi-select (the row's original Source Systems was `Gmail` only). After execution, the row reflects both: `Gmail` (the originating signal) AND `Orbit` (the executor-touched system).
 
 Edge cases:
-- **`row.project_id` null at execution time.** Defensive check; the matcher's project-uncertainty rule should prevent this path. If it happens, skip execution and write Outcome: `Skipped — project unresolved at execution time. Please create the parent task manually on the right project.`
+- **`project_id` null at execution time.** Defensive check; the matcher's resolution rule (not-found → Flag) and the note-interpreter's project-resolution should prevent this path. If it happens, skip execution and write Outcome: `Skipped — project unresolved at execution time. Reply with the project name to create it, or create the parent task manually.`
 - **`create_task` MCP fails.** Standard retry-with-backoff per `connector-failure-notify.md` (4 attempts, 2s/5s/15s backoff). On exhaustion, write Outcome: `FAILED — parent task creation failed: <error>. Retry manually.`
 - **Project exists but PM is not a follower.** Add PM as follower in `internal_followers` per the parameter rule above. Orbit will accept this even if PM is new to the project.
 

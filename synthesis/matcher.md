@@ -30,7 +30,7 @@ The Morning Queue exists to drive **exactly five AI actions and only five**:
 2. **`Reopen subtask`** — same as Create subtask BUT an existing open subtask of matching work_type already sits under the parent (Job 5.5 detected it). Executor reopens the existing subtask, posts new-work comment, reassigns to last non-PM dev. No new task created.
 3. **`Hand off parent task`** — non-pod work (work_type ∈ AUDIT, QUOTE, SEO, DESIGN, CONTENT, BA). Executor reassigns the existing PM-owned parent directly to the functional pool leader; PM stays as internal follower. No subtask.
 4. **`Flag`** — signal needs PM attention but is not delegate-able (PM owns next move: client email, scope decision, AM reply). No auto-execution. Flag rows carry summary + sources + suggested PM-next-step. PM resolves manually and marks `Skip. No Action Needed`.
-5. **`Create parent task`** — Possible Orbit miss; Gmail-only critical-language signal with NO corroborating Orbit task. On PM approval, Mode 2 creates the parent on the resolved project assigned to the PM, so the PM can spawn sub-tasks under it in later runs.
+5. **`Create parent task`** — Possible Orbit miss; an unactioned client email (delivery reply, delivery-token, or issue/feature mail) with NO corroborating Orbit task. Project resolved from the workload map or by lazy Orbit search; dedup-checked. On PM approval, Mode 2 creates the parent on the resolved project assigned to the PM, so the PM can spawn sub-tasks under it in later runs.
 
 The "PM's own parent task on that project" semantic is the load-bearing constraint for paths 1, 2, and 3: the PM holds a parent task for each active engagement. Verbs 1+2 spawn / reuse sub-tasks under that parent; verb 3 reassigns the parent itself. If no PM-owned task exists on a project that needs new work, the row downgrades to a Flag row asking the PM to seed a parent task — see Job 5 "Picking the parent task" for the fallback (applies to verbs 1+2+3).
 
@@ -146,7 +146,7 @@ There are exactly five locked verbs. Each row picks one in Job 5 + 5a + 5.5. The
 | `Reopen subtask` | Same pod-resource work_type, but an existing open subtask already sits under the parent (Job 5.5 detected it). Executor flips status, appends new-work comment, reassigns to last non-PM dev. |
 | `Hand off parent task` | Work that does NOT touch HTML/PHP/QA pod resources (work_type ∈ QUOTE, SEO, AUDIT, DESIGN, CONTENT, BA). Executor reassigns the existing PM-owned parent directly to the pod leader; no subtask. |
 | `Flag` | Signal needs PM attention but is not delegate-able (PM owns next move: client email, scope decision, AM reply). No auto-execution. |
-| `Create parent task` | Gmail-only signal carrying critical-language tokens that has NO matching Orbit task — Possible Orbit miss. On PM approval, Mode 2 creates a parent Orbit task on the resolved project assigned to the PM. See "Possible Orbit miss detection" sub-section in Job 5. |
+| `Create parent task` | An unactioned client email with NO matching Orbit task — Possible Orbit miss (S1a delivery reply / S1b delivery-token / S2 issue-feature). On PM approval, Mode 2 creates a parent Orbit task on the resolved project assigned to the PM. See "Unactioned client signal → Create parent task" sub-section in Job 5. |
 
 These five are the ONLY values that may appear in the `Recommended Action` column's verb position. If the matcher cannot frame the row with one of these five, the row was misclassified — re-run the Output gating filter and either drop or downgrade.
 
@@ -228,7 +228,7 @@ The action set is closed: `Create subtask`, `Reopen subtask`, `Hand off parent t
 1. **Run Job 5a — work-type classifier.** Classify the signal into one of: `HTML_CSS | PHP_BACKEND | QA | AUDIT | QUOTE | SEO | DESIGN | CONTENT | BA | OTHER`. Job 5a output (`row.work_type`) drives both this Job 5 verb pick AND Job 6 pod-boundary routing.
 2. **Priority-lane override (still applies).** If the signal carries `signal_type: am_handed_to_pm_overnight_due_today`, the parent is pinned to `signal.parent_task_id`. Action defaults to `Create subtask` (or `Reopen subtask` after Job 5.5 check). Never `Flag`.
 3. **Flag the PM-owned moves first.** If the next move is PM-owned (reply to an AM, decide a scope question, brief the team for a meeting), choose `Flag` regardless of work_type. Examples: "Ellen needs dev names for the 27 May Joe Warner call", "FTP credentials still missing — PM decides whether to chase client directly".
-4. **Possible Orbit miss check (Gmail-only critical signals).** Before defaulting a Gmail-only signal to a workshop verb, run the "Possible Orbit miss detection" criteria below. If ALL four criteria hold AND project resolution is unambiguous, choose `Create parent task`. If criteria hold but project is ambiguous, choose `Flag` with the "auto-create skipped" `pm_next_step` per the project-uncertainty rule.
+4. **Unactioned client signal check (Possible Orbit miss).** Before defaulting a Gmail-only signal to a workshop verb, run the "Unactioned client signal → Create parent task" detection below. If the entry gate + any one of the three trigger sub-classes (S1a/S1b/S2) fire, run project resolution + dedup: a resolved, non-duplicate project → `Create parent task`; project not found or a topic-matching open task already exists → `Flag` with the corresponding `pm_next_step`.
 5. **Work-type → verb branch.** For signals that are dev-shaped work (not PM-owned, not Possible Orbit miss), the verb depends on `work_type`:
 
     | `work_type` | Default verb (pre Job 5.5) |
@@ -299,27 +299,55 @@ Output deltas:
 - `row.verb` may flip from `Create subtask` to `Reopen subtask`.
 - New fields: `row.existing_subtask_id`, `row.existing_subtask_title`, `row.last_dev_user_id`, `row.new_work_description`.
 
-#### Possible Orbit miss detection (Create parent task path)
+#### Unactioned client signal → Create parent task (Possible Orbit miss path)
 
-Detection criteria — ALL four must hold for a Gmail signal to qualify:
+This path catches client emails that should have become an Orbit task but did not — whether the AM/PM never created the task, or the client delivered something we asked for and nobody acted. It feeds the `Create parent task` verb.
 
-1. **No Orbit corroboration.** After Job 4b Pass 1, the Gmail signal has an empty `context_signals[]` array (no Orbit signal was linked as context).
-2. **No PM-owned Orbit task on candidate projects.** The Gmail signal's `context_link.project_id_candidates` does NOT resolve to any active task currently assigned to the PM in the Orbit relationship map — for every candidate `project_id`, the relationship-map task list contains zero tasks where `is_pm_owned == true`.
-3. **Critical-language token present.** The Gmail signal body OR subject contains at least one of the following tokens (case-insensitive substring match): `urgent`, `asap`, `today`, `eod`, `end of day`, `blocker`, `blocking`, `critical`, `escalation`, `please do`, `cannot wait`, `client is waiting`, `before tomorrow`.
-4. **Sender is external.** The sender is NOT the running PM's canonical email or any alias (self-noise filter).
+**Entry gate.** A Gmail signal qualifies when BOTH of these hold:
 
-When all four hold AND project resolution is unambiguous (see the project-uncertainty rule below), emit a `Create parent task` row with:
+- **Unactioned.** After Job 4b Pass 1 the signal has an empty `context_signals[]` array (no Orbit signal linked as context) AND the PM-action filter (Job 5 PM-action detection) found no PM reply/comment on the thread or its project. The signal is genuinely sitting unhandled.
+- **Sender is external.** The sender is NOT the running PM's canonical email or any alias (self-noise filter).
+
+…AND **any one** of the three trigger sub-classes fires (read the collector's `awaiting_action_hint` block on the signal — `collectors/gmail.md`):
+
+- **S1a — reply-to-our-ask + deliverable.** `awaiting_action_hint.is_reply_to_wliq_ask == true` (the client message is a reply on a thread where WLIQ previously asked for something — `thread_depth > 1` with a prior outbound WLIQ message in `pm_last_message_excerpt`/thread) AND `awaiting_action_hint.has_deliverable == true` (attachment present, or a link / "as requested / here is / attached" phrasing in the body).
+- **S1b — delivery tokens.** `awaiting_action_hint.delivery_tokens` is non-empty: body OR subject contains delivery phrasing (`here is`, `here's`, `as requested`, `as discussed`, `attached`, `please find`, `you asked for`, `completed`, `done`, `sharing`, `for your review`).
+- **S2 — issue / error / feature request (critical-language).** `awaiting_action_hint.issue_tokens` is non-empty: body OR subject contains at least one of `urgent`, `asap`, `today`, `eod`, `end of day`, `blocker`, `blocking`, `critical`, `escalation`, `please do`, `cannot wait`, `client is waiting`, `before tomorrow`, `bug`, `broken`, `not working`, `error`, `issue`, `can you add`, `feature request`, `please change` (case-insensitive substring match).
+
+When the entry gate + at least one sub-class fire, run **project resolution** then **dedup**, and the outcome of THOSE — not the trigger — decides `Create parent task` vs `Flag`.
+
+##### Project resolution — workload map first, then lazy Orbit search
+
+1. **Map hit.** If `context_link.project_id_candidates` resolves to exactly one project in the relationship map, use it. (It need not have a PM-owned task — that requirement is dropped; the dedup step below handles "already covered".)
+2. **Lazy Orbit search** — fires ONLY when the map yields zero candidates (low volume, mirrors the Job 4b Fathom lazy-fetch pattern):
+   - **Resolve the client.** `list_clients(search_value=<sender company / name>)` — match by company name, or match the sender's email domain against the returned `website_link`. (`get_client_details(company_name=…)` is the fuzzy fallback; it returns the client's AM + `contact_people` emails + project *counts*, NOT the project list.)
+   - **List the client's projects.** `list_projects(client_id=<matched client>)` — returns each project's `id`, `title`, `project_number`, `owner_id`, `account_manager_id`. (Or `list_projects(search_value=<project-name keywords from subject>)` when the subject names the project directly.)
+   - **Disambiguate** by topic-keyword overlap between the email subject/body and each project `title`; pick the single best. If more than one survives with no clean winner → treat as **not found**.
+   - **Found (any project owner).** Propose `Create parent task` on it regardless of whether the PM owns/AMs it. If the PM is not the project's owner or AM, append `ai_notes`: `Project resolved by search — you are not its owner/AM; confirm before approving.`
+   - **Not found.** Emit a `Flag` row (PM-driven path below).
+3. **`project_number`** for rendering comes from the search result (`list_projects`/`get_project_details`), cached per run. Never render the internal `id` (SKILL.md #22).
+
+##### Dedup — "if not already" (topic-matching open task)
+
+Before emitting `Create parent task` on a resolved `project_id`, run `get_project_task_list(project_id, search=<topic keywords>, is_completed="incomplete")`. Note `search` is a `task_title` substring filter, so ALSO pull the project's open top-level tasks (`parent_id == 0`) and compare their `task_title` to the email topic semantically — don't rely on the substring filter alone.
+
+- **Topic-matching open task found** → do NOT create. Emit a `Flag` with `ai_notes` prefix `Possible duplicate:` and `pm_next_step: "Possible existing task — #<id> '<title>' on <project> may already cover this. Reopen/comment there, or reply 'create anyway' to add a new one."`
+- **No match** → proceed to the `Create parent task` emission below.
+
+##### Create parent task emission
+
+Emit a `Create parent task` row with:
 
 - `recommended_action`: `Create parent task on <project> assigned to you`
-- `task_title`: derived from the email subject. 6–12 words, verb-led where the subject allows; strip greeting prefixes ("Re:", "FW:") and corporate noise. Example: subject `"Re: URGENT — broken contact form on Agency X homepage"` becomes `task_title: "Investigate broken contact form on Agency X homepage"`.
+- `task_title`: derived from the email subject. 6–12 words, verb-led where the subject allows; strip greeting prefixes ("Re:", "FW:") and corporate noise. Example: subject `"Re: URGENT — broken contact form on Agency X homepage"` becomes `task_title: "Investigate broken contact form on Agency X homepage"`. For a delivery (S1a/S1b), name the follow-up action, not the delivery — e.g. `"Process client-delivered brand assets for Agency X homepage"`.
 - `proposed_orbit_body`: full 6-section body per `schemas/orbit-dq-standard.md`, plain language per `writers/plain-language.md`. The body cites the Gmail thread as the originating signal.
 - `assignee_id`: PM_user_id (the parent lands on the PM's plate so the PM can subsequently spawn sub-tasks under it the normal way).
 - `parent_task_id`: `null` (this row CREATES the parent — no parent to nest under).
-- `project_id`: the single resolved candidate.
-- `ai_notes`: prefixed with `Possible Orbit miss:` — e.g. `Possible Orbit miss: critical-language signal from jane@agencyx.com with no corroborating Orbit task. Creating parent task on Agency X on your approval.`
+- `project_id`: the single resolved project (map or search).
+- `ai_notes`: prefixed with `Possible Orbit miss:` — name the sub-class and source, e.g. `Possible Orbit miss: client delivery from jane@agencyx.com (reply to our request) with no corroborating Orbit task. Creating parent task on Agency X on your approval.` Append the not-owner note from project resolution if it applies.
 - `pm_next_step`: omitted entirely (this is not a Flag row).
 
-**Project-uncertainty rule (safety valve).** If `project_id_candidates` has more than one element OR sender-domain → client resolution is low-confidence (sender domain doesn't uniquely map to a single active client) OR matched client has multiple active projects with no clean topic disambiguation, do NOT emit `Create parent task`. Instead, emit a `Flag` row with `pm_next_step: "Possible Orbit miss — please create the parent task manually; auto-create skipped because project resolution was ambiguous: <comma-separated candidate list>."` Reason: a parent task on the wrong project is harder to clean up than a Flag the PM resolves manually.
+**Not-found / duplicate Flag rows are resolved by a PM Note in Mode 2** — `synthesis/note-interpreter.md` § "create it on <project> / create anyway" turns the PM's reply into a `create_parent_task` action.
 
 **Why a parent and not a sub-task.** The PM-owned parent does not yet exist on the project — that's the whole point of "Possible Orbit miss". Creating a sub-task requires a parent; this signal class creates the parent itself. Future sub-tasks for the same engagement nest under this parent the normal way (via the standard `Create subtask` path in later morning runs).
 

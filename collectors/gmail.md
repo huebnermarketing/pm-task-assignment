@@ -111,6 +111,12 @@ Use the Orbit relationship map (from the Orbit collector) to classify each sende
     "topic_keywords": [<string>, ...],
     "timestamp": <ISO datetime>
   },
+  "awaiting_action_hint": {
+    "is_reply_to_wliq_ask": <bool>,
+    "has_deliverable": <bool>,
+    "delivery_tokens": [<string>, ...],
+    "issue_tokens": [<string>, ...]
+  },
   "latest_signal": {
     "source": "gmail_message",
     "id": <string — message_id of the newest non-PM message in the thread>,
@@ -161,6 +167,17 @@ Every Gmail signal carries a `context_link` object so `synthesis/matcher.md` Job
 - **`timestamp`** — ISO datetime of the latest message in the thread. Used for Job 4b's ±24h time-proximity rule when matching against Orbit events.
 
 The collector populates `context_link` on EVERY Gmail signal regardless of whether the matcher actually links it later. This is cheap — the data is already extracted during normal collection.
+
+## `awaiting_action_hint` — feeds the Possible-Orbit-miss trigger
+
+Populated on `client_awaiting_response`, `attachment_received`, and `thread_updated` signals (the client-originated classes). It tells `synthesis/matcher.md` § "Unactioned client signal → Create parent task" which of the three trigger sub-classes apply, computed from data the collector already pulled — NO extra MCP calls. Other signal types (am_message, team_request, leadership_message, unsent_draft, starred_unaddressed) may set all fields false / empty.
+
+- **`is_reply_to_wliq_ask`** — `true` when the latest message is a client reply on a thread where WLIQ asked for something: `thread_depth > 1` AND `pm_last_message_excerpt` (or any prior outbound WLIQ message in the thread) reads as a request/ask ("can you send", "please share", "could you provide", "let us know", "we need", "waiting on"). Plain-language judgment, no regex.
+- **`has_deliverable`** — `true` when the latest client message carries something we can act on: `attachments` is non-empty, OR the body contains a shared link (Drive/Dropbox/WeTransfer/Figma URL), OR delivery phrasing ("as requested", "here is", "attached", "please find").
+- **`delivery_tokens`** — the subset of delivery phrases actually found in subject/body (`here is`, `here's`, `as requested`, `as discussed`, `attached`, `please find`, `you asked for`, `completed`, `done`, `sharing`, `for your review`). Empty list when none.
+- **`issue_tokens`** — the subset of issue / critical-language phrases found in subject/body (`urgent`, `asap`, `today`, `eod`, `end of day`, `blocker`, `blocking`, `critical`, `escalation`, `please do`, `cannot wait`, `client is waiting`, `before tomorrow`, `bug`, `broken`, `not working`, `error`, `issue`, `can you add`, `feature request`, `please change`). Empty list when none.
+
+The matcher fires S1a when `is_reply_to_wliq_ask && has_deliverable`, S1b when `delivery_tokens` is non-empty, S2 when `issue_tokens` is non-empty. Any one is enough.
 
 ## Full thread context
 
