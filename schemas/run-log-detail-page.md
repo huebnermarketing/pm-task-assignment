@@ -22,11 +22,17 @@ The page lives as a sub-page of the parent (same parent as the `Run Log` sub-pag
 
 Single callout block, one line:
 
-> Mode N · `HH:MM`–`HH:MM` IST · Status · `<S>` signals · `<W>` items · `<E>` errors
+> Mode N · `HH:MM`–`HH:MM` IST · Status · `<S>` signals · `<W>` items · `<E>` errors `[· queue ✅ db | · queue ⚠️ <failed_keys>]`
 
-Example:
+The queue-structure marker is appended on **Mode 1** runs only: `· queue ✅ db` when every `notion_write_assertions` key passed, or `· queue ⚠️ <failed_keys>` when any failed. `<E>` errors includes the count of failed queue-structure assertions.
 
-> Mode 1 · 09:30–09:33 IST · OK · 18 signals · 6 items · 0 errors
+Example (healthy):
+
+> Mode 1 · 09:30–09:33 IST · OK · 18 signals · 6 items · 0 errors · queue ✅ db
+
+Example (markdown-dump failure caught):
+
+> Mode 1 · 09:15–09:23 IST · Failed · 55 signals · 6 items · 2 errors · queue ⚠️ db_created,no_markdown_row_dump
 
 ### 2. Sources section
 
@@ -77,6 +83,20 @@ Heading: `Connector failures`. One bullet per tier reached in `connector-failure
 ```
 
 Omit the section if no failures occurred (do not write an empty heading).
+
+### 6.5 Queue structure assertions section (Mode 1 only)
+
+Heading: `Queue structure assertions`. The proof that the Morning Queue was written as a real Notion database (not a page-body markdown dump). Populated from `writers/notion.md` Step 6.5. One bullet per assertion key. Format:
+
+```
+db_created: PASS
+db_row_count_matches: PASS (6 rows == 6 items)
+row_detail_pages_created: PASS (6 detail pages)
+no_markdown_row_dump: PASS
+single_db: PASS
+```
+
+**Never omitted on a Mode 1 run** — a healthy run shows all-PASS as positive evidence, not just silence. If any key is FAIL, prefix the section with a one-line callout `⚠️ Queue was not written as a valid database` and the run Status is `Failed` (the run-log writer enforces the OK→Failed override). Omit only for Mode 2 / Monthly Archival.
 
 ### 7. Mode 2 execution section (Mode 2 only)
 

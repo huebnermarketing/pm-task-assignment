@@ -2,6 +2,9 @@
 
 The inline database that sits inside each dated sub-page. One row per item. The skill creates a fresh Morning Queue database every Mode 1 run (one per dated page).
 
+> **BUILD CONTRACT (mandatory) — this is a DATABASE, not markdown.**
+> The Morning Queue is created with `notion-create-database` and populated with one **database row** per item (`writers/notion.md` Step 4 + Step 6.1). The long per-row content lives on each row's **detail sub-page** (Step 6.2), never on the dated page body. Rendering items as Heading / paragraph blocks in the page body (`### Row 1 — …`, `**Project:** …`, `**Triggered by:** …`) is **FORBIDDEN** and is a **FAILED run** — Mode 2 reads `Status` + the `Ready for Execution` toggle off DB rows, so a markdown dump is non-executable even though it looks complete. There is no markdown fallback if the DB tool feels longer or errors; retry once then abort (`writers/notion.md` Error-handling table). The `writers/notion.md` Step 6.5 verification gate re-fetches the page and proves `db_created` + `no_markdown_row_dump` before the run may report `OK`; a failure forces `Status = Failed` in the Run Log.
+
 ---
 
 ## Database identity

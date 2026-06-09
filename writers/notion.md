@@ -69,6 +69,12 @@ Content order:
    - One line: `N items for your morning. X sub-tasks, Y flags. <M signals filtered — see Run Log if you want to audit>.`
 
 4. **Inline Morning Queue database**
+
+   > **HARD RULE — the queue is a Notion DATABASE, never page-body markdown. NON-NEGOTIABLE.**
+   > The Morning Queue MUST be built as a real inline database (`notion-create-database` + one DB row per item). Rendering items as Heading / paragraph blocks in the dated page body — e.g. `### Row 1 — Hand off…`, `**Project:** …`, `**Triggered by:** …` written straight into the page content — is **FORBIDDEN** and constitutes a **FAILED run**, not a stylistic variant. Mode 2 reads the `Status` column and the `Ready for Execution` toggle off DB rows; a markdown dump leaves Mode 2 with nothing to iterate, so the queue is dead even if the PM flips the toggle.
+   > There is **NO fallback** to inline markdown if the database flow feels longer, the `notion-create-pages` content path looks simpler, or the DB tool errors. If `notion-create-database` fails, retry once, then abort per the Error-handling table — do NOT route the rows into the page body to "save the run". A markdown queue is worse than no queue: it looks complete while being non-executable, and it silently breaks Mode 2.
+   > **Mandatory tool sequence (every Mode 1 run, in this order):** (a) `notion-create-database` on the dated page → capture `morning_queue_db_id`; (b) per surviving item, a DB-row create against `morning_queue_db_id` (Step 6.1) → capture each `row_id`; (c) per item, `notion-create-pages` for the row-detail sub-page (Step 6.2). The long per-row content (Task Brief, Triggered-by, Sources, Recommended Action reasoning, AI Notes) lives ONLY on the row-detail sub-page — never on the dated page body. If `notion-create-database` did not fire this run, the queue was NOT written, regardless of what the dated page looks like. The Step 6.5 gate verifies this before the run is allowed to report `OK`.
+
    - Create via `notion-create-database` with the parent as this dated page.
    - Schema per `schemas/morning-queue-database.md` — 10 columns, all visible in the default view, in order: Summary, AI Notes, Orbit Task Link, Project, Recommended Action, Recommended Assignee, Outcome, PM Notes, Source Systems, Status.
    - `Orbit Task Link` is Notion's native URL property — single clickable URL per row. For `Create subtask` / `Reopen subtask` / `Hand off parent task` rows it holds the parent task's Orbit URL; for `Flag` rows it holds the bound Orbit task URL, or `—` / empty when no Orbit task is bound (e.g., Gmail-only flag); for `Create parent task` rows it holds `—` (the parent doesn't exist yet). The sub-task URL that Mode 2 creates is written into `Outcome` only — never into `Orbit Task Link` (which keeps the parent reference stable through the row's lifetime).
@@ -102,7 +108,7 @@ For each item that survives Step 5.5, the writer renders the row's detail page w
 
 For each item in the matcher's output array (after Step 5.5 gating):
 
-1. Create a row in the database with (in schema DDL order — Summary, AI Notes, Orbit Task Link, Project, Recommended Action, Recommended Assignee, Outcome, PM Notes, Source Systems, Status):
+**Step 6.1 — Create the database row.** Against `morning_queue_db_id` from Step 4 (NOT as page-body blocks), with (in schema DDL order — Summary, AI Notes, Orbit Task Link, Project, Recommended Action, Recommended Assignee, Outcome, PM Notes, Source Systems, Status):
    - `Summary` (title) — matcher's topic-style one-liner (NOT verb-prefixed; verb lives in `Recommended Action` only)
    - `AI Notes` — any uncertainty flags, split reasoning, matcher Job 6 delegate reasoning, or Job 5.5 last-dev edge cases; for priority-lane rows always populated with `<AM> put this on your plate overnight, due today. Proposed delegate: <name> (<reason>).`; empty otherwise
    - `Orbit Task Link` (URL property) — parent task URL for `Create subtask` / `Reopen subtask` / `Hand off parent task` rows; bound task URL for `Flag` rows that have one; `—` or empty for Flag rows with no Orbit task and for `Create parent task` rows
@@ -114,7 +120,7 @@ For each item in the matcher's output array (after Step 5.5 gating):
    - `Source Systems` — multi-select of which sources contributed (Orbit, Gmail — primary; Fathom only if matcher Job 4b Pass 2 fetched enrichment for this row)
    - `Status` = `Recommended Action` (default)
 
-2. Populate the row's page content per `schemas/row-detail-page.md` (block order is load-bearing — see schema):
+**Step 6.2 — Populate the row-detail sub-page** per `schemas/row-detail-page.md` (block order is load-bearing — see schema). This sub-page is the ONLY place the long per-row content lives:
    - Top callout — Action Block (no heading) — per the 5 verb variants in `schemas/row-detail-page.md` Top callout section.
    - `Summary` heading + matcher's topic-style summary
    - **`Task Brief` heading + Triggered-by line + matcher's `row.task_brief` paragraph (Job 7b output)** — placed BETWEEN Summary and Sources so the PM reads what the work is + what's new before scanning citations. The Triggered-by line is THE FIRST LINE of this block (above the Job 7b narrative), rendered from `row.latest_signal_anchor`: bold-label + source + author + timestamp + 1-line excerpt + source link. Format per `schemas/row-detail-page.md` Task Brief section. Required — Step 5.5 already rejects rows with a null anchor, so render unconditionally.
@@ -128,6 +134,27 @@ For each item in the matcher's output array (after Step 5.5 gating):
    - `Proposed Handoff` heading + plain-language message (Create subtask / Reopen subtask / Hand off parent task)
    - `AI Notes` heading (if any notes). For priority-lane rows, AI Notes carries the matcher's `<AM> put this on your plate overnight, due today. Proposed delegate: <name> (<reason>).` line.
    - Bottom toggle: `Reference Context for the Skill — working memory, not for review`, containing the full raw signals and pod inference reasoning
+
+### Step 6.5 — Mandatory post-write structure verification (assertion gate)
+
+After all rows and row-detail pages are written, the writer **re-fetches the dated page and proves the queue is a real database before the run is allowed to report `OK`.** This is the gate that catches the markdown-dump failure mode (the writer skipping `notion-create-database` and dumping rows as page-body headings). Do NOT skip this gate even when the writer "knows" it created the database — verify against Notion, not against intent.
+
+1. `notion-fetch` the dated page block tree.
+2. Compute and record the following assertions into a `notion_write_assertions` object (passed to `writers/run-log.md` in Mode 1 Step 4e):
+
+   | Assertion key | Pass condition |
+   |---|---|
+   | `db_created` | Exactly one `<database>` block titled `Morning Queue` exists on the dated page body. |
+   | `db_row_count_matches` | The database's row count equals `items_written` (the count of items that survived Step 5.5 gating). |
+   | `row_detail_pages_created` | A row-detail sub-page exists for every DB row (count equals `items_written`). |
+   | `no_markdown_row_dump` | The dated page body contains **no** queue-row content rendered as heading/paragraph blocks. Heuristic: no body Heading block whose text matches `Row \d+ —`, and no body paragraph leading with `**Project:**` / `**Triggered by:**` / `**Recommended action:**`. The only headings allowed on the dated page body are the structural ones (Morning Queue, Slack handles reference, Pod/AM digest anchors added in Mode 2). |
+   | `single_db` | No duplicate `Morning Queue` database on the page (Idempotency rule). |
+
+3. **On any assertion FAIL:** the run status is `Failed` (not `OK`, not `Partial`). 
+   - If `db_created == false` or `no_markdown_row_dump == false`: this is the markdown-dump bug. Retry the database build **once** — create the database, move the row content off the page body into DB rows + detail pages, and delete the offending page-body blocks. Re-run this gate.
+   - If the retry still fails, abort per the Error-handling table (`Database creation fails` / `Queue rendered as page-body markdown` rows) — send the PM the failure email, and pass the failed assertions to `writers/run-log.md` so the Run Log row records `Status = Failed` with the specific assertion(s) that failed. **Never report `OK` with a failed structure assertion** — a falsely-green Run Log is what let the 04 June markdown-dump run pass silently.
+
+4. **On all assertions PASS:** proceed to the Slack-handles reference block and exit normally. The passing assertion set is still recorded in `notion_write_assertions` and surfaced in the Run Log (so a healthy run leaves positive evidence the DB was built, not just an absence of errors).
 
 ## Flow — updating rows after Mode 2
 
@@ -433,7 +460,8 @@ Use `notion-update-page` with `command: update_content` and targeted find-and-re
 | Failure | Behavior |
 |---|---|
 | Page creation fails | Retry once. If fails, abort Mode 1 with sent email to PM: `Couldn't write today's morning queue. [error]` |
-| Database creation fails | Retry once. If fails, abort. |
+| Database creation fails | Retry once. If fails, abort Mode 1 with sent email to PM: `Couldn't create the Morning Queue database. [error]`. **Do NOT fall back to rendering rows as page-body markdown** — abort instead. Record `Status = Failed` + `db_created: false` in the Run Log. |
+| Queue rendered as page-body markdown (Step 6.5 `no_markdown_row_dump` or `db_created` FAILS) | This is a writer bug, not a Notion error. Retry the database build once: create the DB, migrate row content into DB rows + detail pages, delete the offending page-body heading/paragraph blocks, re-run the Step 6.5 gate. If still failing, abort with sent email to PM: `Morning queue was written as plain text instead of a database — aborted to avoid a non-executable queue. [assertion]`. Record `Status = Failed` + the failed assertion keys in the Run Log. Never report `OK`. |
 | Row creation fails for a single item | Log in AI Notes on the summary block, continue with remaining rows |
 | Block reorder fails during archival | Log and continue. Order drift can be corrected on the next fire. |
 | `notion-move-pages` fails during archival sub-page reorder (Run Log / Incidents / Preferences) | Log and continue. |
@@ -451,6 +479,7 @@ Use `notion-update-page` with `command: update_content` and targeted find-and-re
 
 ## What this writer does NOT do
 
+- **Never renders queue rows as page-body markdown.** The Morning Queue is always a real Notion database (`notion-create-database` + DB rows). Heading/paragraph blocks like `### Row N — …`, `**Project:** …`, `**Triggered by:** …` on the dated page body are forbidden and fail the Step 6.5 gate. See the HARD RULE in Step 5 item 4.
 - Does not write to V3 pages (see `references/v3-context.md`)
 - Does not modify the PM's Preferences page autonomously (only via explicit preference-edit commands)
 - Does not delete pages or databases

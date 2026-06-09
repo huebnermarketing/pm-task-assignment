@@ -29,12 +29,23 @@ run_summary = {
   connector_failures: [ { connector, step, error, tier }, ... ],
   filtered_signals:   [ { source, summary, filter_reason, citations }, ... ],  // Mode 1 only — from matcher Job 11
   execution_outcomes: [ { row, task, outcome, pm_note_interp }, ... ],  // Mode 2 only
+  notion_write_assertions: {                                            // Mode 1 only — from writers/notion.md Step 6.5 gate
+    db_created:               bool,    // a Morning Queue database block exists on the dated page
+    db_row_count_matches:     bool,    // DB row count == items_written
+    row_detail_pages_created: bool,    // one detail sub-page per DB row
+    no_markdown_row_dump:     bool,    // no queue rows rendered as page-body heading/paragraph blocks
+    single_db:                bool,    // exactly one Morning Queue database on the page
+    db_row_count:             integer, // observed DB row count (for the trace)
+    failed_keys:              [ string, ... ],  // assertion keys that failed ([] when all pass)
+  },
   links: {
     queue_page_url:   string | null,        // Mode 1 / Mode 2
     archived_toggle:  string | null,        // Monthly Archival
   }
 }
 ```
+
+For Mode 2 and Monthly Archival, pass `notion_write_assertions: null` (the gate is Mode 1 only). For a Mode 1 run that aborted **before** the Notion write was attempted, pass the object with `db_created: false` and `failed_keys: ["db_created"]` so the trace records that no queue was written.
 
 If a list field has no entries, pass `[]` (the writer omits the corresponding section heading).
 
@@ -60,17 +71,20 @@ Then check idempotency (Step 6 below) and adjust the ID if a duplicate exists.
 
 Render the page body per `schemas/run-log-detail-page.md`. Sections in order:
 
-1. Header callout — one line: `<Mode> · <HH:MM>–<HH:MM> IST · <Status> · <signals> signals · <items_written> items · <errors> errors` (errors = `len(connector_failures) + count of execution_outcomes where outcome == "failed"`).
+1. Header callout — one line: `<Mode> · <HH:MM>–<HH:MM> IST · <Status> · <signals> signals · <items_written> items · <errors> errors` (errors = `len(connector_failures) + count of execution_outcomes where outcome == "failed"` + `len(notion_write_assertions.failed_keys)`). For Mode 1, append a queue-structure marker to the line: `· queue ✅ db` when all assertions pass, or `· queue ⚠️ <failed_keys joined by ','>` when any failed.
 2. `Sources` — one bullet per `sources[i]` (omit section if `sources == []`).
 3. `Decisions` — one bullet per `decisions[i]`, formatted `Item N — [subject] → [action] → [reason]`.
 4. `Skipped` — one bullet per `skipped[i]` (omit if empty).
 5. `Uncertain` — one bullet per `uncertain[i]` (omit if empty).
 6. `Connector failures` — one bullet per `connector_failures[i]` (omit if empty).
-7. `Filtered signals (N)` — Mode 1 only. Notion toggle block, **closed by default**. Inside: one bullet per `filtered_signals[i]`, formatted `<source> · <summary> · <filter_reason> · <citations>`. Omit the toggle entirely if `filtered_signals == []`. This is where the PM audits what the matcher dropped under the 5-verb output-gating rule (`synthesis/matcher.md` Output gating + Job 11).
-8. `Execution outcomes` — Mode 2 only; one bullet per `execution_outcomes[i]`.
-9. Footer — `Run Log database` link + queue-page-or-archived-toggle link.
+7. `Queue structure assertions` — Mode 1 only. One bullet per assertion key in `notion_write_assertions`, formatted `<key>: PASS | FAIL` followed by the observed value where relevant (`db_row_count_matches: PASS (6 rows == 6 items)`). This section is **never omitted on a Mode 1 run** — a healthy run shows positive evidence the database was built (all PASS), not just an absence of errors. Omit only for Mode 2 / Monthly Archival (where `notion_write_assertions == null`). If `failed_keys` is non-empty, prefix the section with a one-line callout: `⚠️ Queue was not written as a valid database — see failed assertions below.`
+8. `Filtered signals (N)` — Mode 1 only. Notion toggle block, **closed by default**. Inside: one bullet per `filtered_signals[i]`, formatted `<source> · <summary> · <filter_reason> · <citations>`. Omit the toggle entirely if `filtered_signals == []`. This is where the PM audits what the matcher dropped under the 5-verb output-gating rule (`synthesis/matcher.md` Output gating + Job 11).
+9. `Execution outcomes` — Mode 2 only; one bullet per `execution_outcomes[i]`.
+10. Footer — `Run Log database` link + queue-page-or-archived-toggle link.
 
 Apply the **brevity rules** (next section) to every reason field before rendering.
+
+**Status-consistency rule (enforced here).** A Mode 1 `run_summary` that arrives with `status == "OK"` but a non-empty `notion_write_assertions.failed_keys` is contradictory — the writer **overrides `status` to `Failed`** before rendering both the detail page and the database row, and adds a `Decisions`-style note: `run-log overrode status OK→Failed: queue-structure assertion(s) <failed_keys> failed`. The Run Log is the audit backstop; it must never record a green run over a broken queue. This is the gap that let the 04 June markdown-dump fire report `OK`.
 
 ### Step 4 — Create the detail sub-page
 
@@ -93,13 +107,13 @@ Call `mcp__...notion.notion-create-pages` (or the database-row variant) targetin
 | `Run ID`         | the ID from Step 2                                                   |
 | `Date`           | `started` date portion                                               |
 | `Mode`           | `run_summary.mode`                                                   |
-| `Status`         | `run_summary.status`                                                 |
+| `Status`         | `run_summary.status` (after the Step 3 Status-consistency override — a Mode 1 run with failed queue-structure assertions is recorded as `Failed`, never `OK`) |
 | `Started`        | `run_summary.started` (datetime IST)                                 |
 | `Duration`       | `floor((ended − started) seconds)`                                   |
 | `Signals`        | `sum(sources[i].count)` for Mode 1; `0` for Mode 2 / Monthly         |
 | `Items written`  | `run_summary.items_written`                                          |
 | `Items executed` | `run_summary.items_executed` for Mode 2; `0` otherwise               |
-| `Errors`         | `len(connector_failures) + count(execution_outcomes where failed)`   |
+| `Errors`         | `len(connector_failures) + count(execution_outcomes where failed) + len(notion_write_assertions.failed_keys)` |
 | `Detail`         | URL of the detail page from Step 4                                   |
 
 ### Step 6 — Update calling-mode state
