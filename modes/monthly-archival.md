@@ -22,7 +22,7 @@ The hierarchy invariants archival enforces (against the parent body block tree):
 4. Year-toggle blocks are ordered descending on the parent body (newest year on top).
 5. Month-toggle blocks are ordered descending inside their Year-toggle (newest month on top).
 6. Dated `child_page` blocks are ordered descending inside their Month-toggle (newest date on top).
-7. `Run Log`, `Incidents`, `Preferences` `child_page` blocks are the last three blocks on the parent body, in that order.
+7. `Run Log`, `Incidents`, `Fixed-Cost Registry`, `Preferences` `child_page` blocks are the last four blocks on the parent body, in that order.
 
 Note: dated sub-pages' Notion-tree parent is the parent page itself (sidebar shows them flat under parent). Archival does NOT verify sidebar tree position — only the parent body block placement.
 
@@ -64,17 +64,26 @@ For each Month-toggle reachable from any Year-toggle, walk its children, identif
 
 ### Step 7 — Verify operational sub-page block positions
 
-Confirm `Run Log`, `Incidents`, `Preferences` `child_page` blocks are the last three blocks on the parent body, in that order, after all Year-toggle blocks. Reorder if drifted (use block-reorder via `notion-update-page`; do not move the underlying sub-pages with `notion-move-pages` — they're already correctly parented).
+Confirm `Run Log`, `Incidents`, `Fixed-Cost Registry`, `Preferences` `child_page` blocks are the last four blocks on the parent body, in that order, after all Year-toggle blocks. Reorder if drifted (use block-reorder via `notion-update-page`; do not move the underlying sub-pages with `notion-move-pages` — they're already correctly parented).
 
-### Step 8 — Append archival summary to Run Log
+### Step 8 — Fixed-Cost Registry ledger archival
+
+Non-blocking on failure (Incident, continue). On the Fixed-Cost Registry sub-page, walk the
+Client-Ask Ledger for rows where `Status` is `Resolved` or `Resolved-manual` AND `Resolved on`
+is older than 60 days (relative to today, IST). Move each matching row into an `Archived Asks`
+toggle at the bottom of the registry page — create the toggle if it doesn't exist yet. Rows
+still open, or resolved more recently than 60 days, stay in the live ledger. Log the count of
+rows archived to the Run Log entry (Step 9 below).
+
+### Step 9 — Append archival summary to Run Log
 
 Append a Run Log entry with:
 
 - Trigger = `monthly-archival`
-- Counts: years checked, months checked, dated pages checked, drift items surfaced, reorders performed
+- Counts: years checked, months checked, dated pages checked, drift items surfaced, reorders performed, Client-Ask Ledger rows archived (Step 8)
 - Drift items listed (path each)
 
-### Step 9 — Exit
+### Step 10 — Exit
 
 The archival is complete. Mode 1 may now continue to create today's new dated page inside the correctly-structured hierarchy.
 

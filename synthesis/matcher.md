@@ -47,6 +47,7 @@ The matcher checks the drop list BEFORE deciding Create-subtask vs Flag. If a si
 - Asana / third-party SaaS automation emails (`no-reply@asana.com`, etc.) outside the closed allowlist.
 - Marketing / onboarding / system emails (Anthropic, Notion, Claude.com welcome emails, calendar invite acks).
 - **Signals the PM already handled overnight** — see PM-action detection rule below. This is the most important new drop reason: yesterday the AI was overshooting by emitting Flag-shaped rows even for signals the PM had replied to / commented on / acted on hours earlier.
+- Routine dev activity on fixed-cost registry projects (dev WIP comments / self-status / time logs on their own assigned tasks) → drop with `filter_reason: fixed_cost_routine_activity` — surfaces in the Fixed-Cost Pulse instead.
 
 ### PM-action detection (the no-flag-if-PM-acted rule)
 
@@ -118,6 +119,8 @@ Match signals as the same item when:
 - One signal explicitly cites the other (e.g., Orbit comment quotes an email subject)
 
 When merging, preserve all source signals in `source_signals`. The row's detail page will cite each source separately. Fathom enrichment (if fetched in Job 4b) is attached to whichever primary signal triggered the fetch — it is never a co-signal to dedupe against.
+
+**Fixed-cost mail carve-out.** Signals with `origin: fixed_cost_mail` are EXEMPT from Job 2 dedup — never merge them here, even when they match an Orbit signal on project/topic/actors/window. Their dedup is owned exclusively by Job 4c's shadow dedup (Orbit wins; the mail copy must stay countable for FC-0's audit and the `mail_signals` stat — a Job 2 merge would destroy that distinct mail-side event).
 
 ### Job 3 — Uncertainty handling — NO probable-match grouping
 
@@ -204,6 +207,19 @@ For each Orbit signal, populate `context_signals[]` with the matched Gmail signa
 
 **Additivity.** Linking a Gmail signal as context does NOT consume it. The same Gmail signal may also surface as its own row (under Job 5 — Create subtask or Flag) IF it contains a fresh ask (new requirement, new client question, new commitment). The matcher decides that independently per signal in Job 5.
 
+#### Pass 1b — Fixed-cost standalone Gmail resolution
+
+Pass 1 only links a Gmail signal TO an Orbit signal — it never resolves a Gmail signal on its own. That leaves a real gap: a Gmail-only fixed-cost delivery (client replies with the asset, no Orbit activity that morning to link against) never gets project-resolved before Job 4c runs, so the "widened universe" Job 4c's Inputs describe (`synthesis/fixed-cost-state.md`) would otherwise be unimplemented for the standalone case.
+
+Runs immediately after Pass 1, still before Pass 2. Walk every Gmail signal Pass 1 left UNLINKED (empty `context_signals[]` target — i.e. it did not corroborate any Orbit signal). Note: Orbit-notification mails tagged `origin: fixed_cost_mail` by the Gmail collector (spec §11.2) already arrive pre-resolved with `project_id`/`project_number` and never enter this walk — Pass 1b only handles client/AM Gmail signals that still need resolution. For each:
+
+1. Resolve it against the **tracked fixed-cost project set** (the `registry_snapshot.tracked_projects[]` passed into this run — the same set the collector's fixed-cost discovery lane resolved against, `collectors/orbit.md` § Fixed-cost extension) using:
+   - `gmail.context_link.project_id_candidates` intersecting a tracked project's `project_id`, OR
+   - topic/keyword match (`gmail.context_link.topic_keywords`) against a tracked project's title or `project_number` — same token-overlap judgment as Pass 1 rule 3, no embeddings.
+2. **No new Orbit calls.** This pass resolves purely against the already-in-memory tracked-project set and the signal's own `context_link` — it never fires `list_projects` / `get_project_details` / any other Orbit MCP tool.
+3. **Match** → mark the signal `fixed_cost_linked: true` with the resolved `project_id` / `project_number`. This signal now joins the Job 4c input universe (§ Job 4c below) exactly as if it had been Pass-1-linked to an Orbit signal, even though no Orbit signal co-exists on the same ask/task this morning.
+4. **No match** → the signal is untouched and continues down its ordinary path (Job 5 filtering, the Possible-Orbit-miss / Create-parent-task safety net, etc.) — Pass 1b never drops or diverts a signal, it only adds the `fixed_cost_linked` tag when it can.
+
 #### Pass 2 — Fathom enrichment fetch (lazy, on-demand)
 
 Independently of Pass 1, scan EVERY primary signal (Orbit-priority + Orbit-normal + Gmail) for meeting-reference trigger phrases per the trigger-phrase list documented in `collectors/fathom.md`. For each detected reference, call the Fathom enrichment service:
@@ -222,6 +238,52 @@ Multiple primary signals may reference the same meeting; each gets its own `Enri
 
 **Writer impact.** `writers/notion.md` reads `context_signals[]` AND `enrichment.fathom` on each row. `context_signals[]` renders under the row's Sources H1 section per `schemas/row-detail-page.md`. `enrichment.fathom` renders under the Fathom H2 subsection of Sources (per `schemas/row-detail-page.md`), using the citation formats in `writers/source-citation.md`. Priority-lane rows see the AM-handed Orbit parent task at the top of Sources, the corroborating Gmail thread (if any) below, and the Fathom enrichment (if any) under the Fathom H2.
 
+### Job 4c — Fixed-cost state tracker (delegated)
+
+After Job 4b completes (grouping + Gmail cross-links done) and BEFORE Job 5, run
+`synthesis/fixed-cost-state.md` (FC-1 resolution scan → FC-2 ask detection → FC-3 follow-up
+reminders → FC-4 stale-work pings).
+
+**Input universe (widened — fixes Gmail blindness).** Job 4c's input set is signals tagged
+`origin: fixed_cost_registry` PLUS any Gmail signal Job 4b Pass 1 cross-linked to an Orbit
+signal that carries `origin: fixed_cost_registry` PLUS any Gmail signal Job 4b **Pass 1b**
+resolved standalone (`fixed_cost_linked: true`) against the tracked fixed-cost project set.
+Pass 1b is the mechanism that actually delivers the standalone case — a Gmail-only signal
+with no same-morning Orbit corroboration would never reach Pass 1's cross-link check (Pass 1
+only links Gmail signals TO Orbit signals), so without Pass 1b a purely-email client delivery
+or AM-relayed ask could never resolve into this universe.
+
+PLUS any signal tagged `origin: fixed_cost_mail` (Orbit-notification mails parsed by the
+Gmail collector for tracked projects, spec §11.2 — these arrive pre-resolved with
+`project_id`/`project_number` and do NOT pass through Pass 1b)
+
+**Shadow dedup (spec §11.3).** (Job 2's generic dedup explicitly exempts `origin:
+fixed_cost_mail` signals, so this rule sees them unmerged.) When the run carries BOTH feeds — `activity_source: shadow`
+or the monthly re-audit, where the collector returns `fixed_cost_activity_loop_ran: true`
+alongside `origin: fixed_cost_mail` signals — every `fixed_cost_mail`
+signal that matches an `origin: fixed_cost_registry` signal on (project_id, task, event
+class, timestamp within the same lookback window) is a duplicate: **the Orbit copy wins**,
+the mail copy is dropped from row consideration (it still counts in FC-0's mail event set
+and in the `mail_signals` stat). (A Gmail-failure fallback run carries no mail feed at all —
+Gmail didn't run — so this dedup is simply vacuous there; only the Orbit copy exists.) Mail
+signals with no Orbit counterpart survive — in shadow
+mode that asymmetry is exactly what FC-0 audits (an ORBIT event with no MAIL counterpart is
+a coverage gap; the reverse is fine, mail can be faster than the lookback bound).
+
+It mutates the Fixed-Cost Registry's Client-Ask Ledger + `fc_state` block and returns
+`fc_output = {row_candidates[], ledger_mutations[], fc_state_patch}`. `row_candidates`
+(`fc_row_type: follow_up_reminder | stale_work_ping`) join the Job 5 input set.
+`ledger_mutations` and `fc_state_patch` are carried in memory to the Notion writer's
+registry-refresh flow at end of Mode 1 — Job 4c performs NO Notion writes itself. Registry
+unavailable this run → skip silently (non-blocking).
+
+**Gating for fixed-cost signals in Job 5:** a fixed-cost signal earns a row ONLY if
+actionable-for-PM — blockers/questions aimed at the PM, AM- or client-authored comments,
+task completions that unblock a next step, due-date slips, new unassigned tasks. Routine
+dev progress on dev-assigned tasks (WIP comments, self-status notes, time logging) drops
+with `filter_reason: fixed_cost_routine_activity` — it is represented in the Fixed-Cost
+Pulse, not the queue. Rule 20 applies: quiet fixed-cost projects add zero rows.
+
 ### Job 5 — Recommend the action (5 locked verbs, see Job 4 table)
 
 The action set is closed: `Create subtask`, `Reopen subtask`, `Hand off parent task`, `Flag`, `Create parent task`. Picked in this order:
@@ -231,6 +293,7 @@ The action set is closed: `Create subtask`, `Reopen subtask`, `Hand off parent t
 2.5. **Due-today branch.** If the signal carries `signal_type: pm_task_due_today`, first merge by `task_id` against every other signal surfaced this run (Job 2 dedup, keyed on `task_id` for Orbit signals):
     - **Another signal exists on the same task** (new comment, status change, attached Gmail ask, or — handled above — an AM handoff). That signal's verb wins; the standalone due-today signal is consumed, NOT emitted as its own row. Set `row.due_today = true` so Job 10 prepends `Due today.` to AI Notes and Sort rule 0.5 lifts the row into the due-today band. One task → one row.
     - **due-today is the only signal on the task** → emit a `Flag` row. Anchor = the `orbit_due_today` `latest_signal` from the collector. `pm_next_step = "Due today — review and delegate, progress, or close."` The row carries **no proposed Orbit body, no recommended assignee (`— (PM action)`), and no handoff** — it stays a Flag; the skill does not invent work for a task with no new ask. **BUT this Flag is the one Flag class that fires a *light* deep-read** (see Job 7 § Light deep-read for due-today Flags): a single `get_task_details(task_id)` call — its bundled newest comments (off the flattened, newest-first tree) + `subtasks[]` are enough; NO `list_task_comments` fallback — so Job 7b can compose a "here's where this stands" task_brief and surface the open-subtask status — letting the PM decide inside Notion without opening Orbit (the single-pane mandate). If the cached/fetched `subtasks[]` shows an open subtask already under this task, the brief notes `subtask #<id> open under <assignee> — likely needs your review, not re-delegation.` and AI Notes carries `Due today — subtask #<id> already open under <assignee>; informational, no action needed unless it's stalled.` This Flag is exempt from the "PM will see it in Orbit's UI" drop (Output gating) — that exemption is the whole point of the change.
+2.6. **Fixed-cost state candidates (from Job 4c).** Row candidates carrying `fc_row_type: follow_up_reminder | stale_work_ping` arrive pre-classified as `Flag` — Job 4c (`synthesis/fixed-cost-state.md`) already decided they're actionable-for-PM before handing them to Job 5. No delegation target at emission (Recommended Assignee `—`); a PM note can promote a stale-work ping to a dev exactly like a due-today Flag (see synthesis/fixed-cost-state.md § Output & downstream).
 3. **Flag the PM-owned moves first.** If the next move is PM-owned (reply to an AM, decide a scope question, brief the team for a meeting), choose `Flag` regardless of work_type. Examples: "Ellen needs dev names for the 27 May Joe Warner call", "FTP credentials still missing — PM decides whether to chase client directly".
 4. **Unactioned client signal check (Possible Orbit miss).** Before defaulting a Gmail-only signal to a workshop verb, run the "Unactioned client signal → Create parent task" detection below. If the entry gate + any one of the three trigger sub-classes (S1a/S1b/S2) fire, run project resolution + dedup: a resolved, non-duplicate project → `Create parent task`; project not found or a topic-matching open task already exists → `Flag` with the corresponding `pm_next_step`.
 5. **Work-type → verb branch.** For signals that are dev-shaped work (not PM-owned, not Possible Orbit miss), the verb depends on `work_type`:
@@ -395,6 +458,16 @@ No Mode 2 step writes into `orbit_task_link` later — the column is frozen at r
 
 ### Job 6 — Recommend the assignee
 
+**Short-circuit for fixed-cost rows (`fc_row_type` present) — Critical.** Rows carrying
+`fc_row_type: follow_up_reminder | stale_work_ping` (from Job 4c) skip Job 6 entirely, the
+same way a bare `pm_task_due_today` Flag skips it (see Job 7 § Light deep-read for due-today
+Flags). Recommended Assignee stays `—` (mandated by Job 4c/5 emission — no auto-execution,
+no delegation target). For `stale_work_ping` rows specifically, the row's own Summary /
+Task Brief already names the task's CURRENT assignee (`stale_assignee_name`) — that is
+roster fact carried through from `synthesis/fixed-cost-state.md`, not a Job 6 recommendation,
+and must not be overwritten. No pod-inference, no candidate pool, no `get_user_workload`
+candidate calls, no 4-branch decision tree — for either row type.
+
 **Short-circuit for `Create parent task` rows.** Job 5 already set `assignee_id = PM_user_id` for these rows (the parent is the PM's coordination anchor). Skip pod-inference entirely. Render `recommended_assignee` as `You (PM)` with reason `Parent task assigned to you so you can spawn sub-tasks in later runs.` No availability check, no candidate pool, no Job-6 decision tree.
 
 **Short-circuit for `Reopen subtask` rows.** Job 5.5 already resolved `row.last_dev_user_id`. Skip pod-inference. Render `recommended_assignee` as `<last_dev name> (<role>) — back on the existing subtask #<existing_subtask_id> they last worked.` If `last_dev_user_id` is null (Job 5.5 flagged inactive-dev or no-non-PM-history edge cases), render `— (please pick — see AI Notes)` and let the PM resolve.
@@ -410,7 +483,7 @@ No Mode 2 step writes into `orbit_task_link` later — the column is frozen at r
 
 Render `recommended_assignee` as `Manan Rana (Marketing/SEO lead) — handoff target for <work_type> work.` or `Jay Panchal (Design lead) — handoff target for design work.` accordingly. `DESIGN` always resolves to Jay Panchal even though design sometimes sits inside the broader Marketing/SEO org — the design carve-out wins over the Marketing/SEO default. This exception is **independent of Pod Matrix state** — it fires even when the matrix is unavailable or the functional_pool came back empty, so these two handoffs never fall to `Uncertain:` for lack of a resolvable lead. `QUOTE` and `BA` are NOT covered by this exception — they continue to use the generic functional-pool-leader lookup (Quoting lead, BA lead). Only `Hand off parent task` rows are affected; `Create subtask` routing (HTML/PHP/QA pods) is untouched.
 
-For all other rows (`Create subtask`, `Flag`), continue with the 4-branch decision tree below.
+For all other rows (`Create subtask`, `Flag` not carrying `fc_row_type` — see the fixed-cost short-circuit above), continue with the 4-branch decision tree below.
 
 Call `synthesis/pod-inference.md` with the item's project ID. It returns the candidate pool — matrix members ∪ Orbit followers/recent-assignees — with role hints, familiarity scores, `has_history_on_project` booleans, matrix membership flags, plus the `floater_pool` and `functional_pools` for fallback paths.
 
@@ -555,7 +628,7 @@ After all deep-reads land, Job 7 selects `row.latest_signal_anchor` as the newes
 
 ```
 row.latest_signal_anchor = {
-  source: "orbit_comment" | "orbit_task_body_update" | "orbit_status_change" | "orbit_due_date_change" | "orbit_due_today" | "gmail_message" | "fathom_meeting",
+  source: "orbit_comment" | "orbit_task_body_update" | "orbit_status_change" | "orbit_due_date_change" | "orbit_due_today" | "orbit-mail" | "gmail_message" | "fathom_meeting",
   id: <int or string>,
   timestamp_iso: <ISO 8601>,
   author_name: <string>,

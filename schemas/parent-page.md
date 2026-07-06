@@ -38,6 +38,7 @@ See also:
 
 📒 Run Log         ← sub-page (unchanged) — routine-fire log + linked detail pages
 🚨 Incidents       ← sub-page (unchanged) — append-only connector-failure log (Tier 4 fallback)
+💰 Fixed-Cost Registry ← sub-page (unchanged) — fixed-cost tracking snapshot + Client-Ask Ledger
 ⚙️ Preferences     ← sub-page (unchanged) — always last
 ```
 
@@ -60,7 +61,7 @@ Day pages are still **sub-pages**. Their Notion-tree parent is the parent page i
 
 **Why hybrid:** toggle blocks let the PM scan the whole year on a single page (open the right Year/Month, see all the dates) without clicking into nested sub-pages. Day pages stay as sub-pages because (a) Mode 2 needs a stable URL per day, (b) row detail pages live as children of the day page, (c) the day page contains an inline database (Morning Queue) which renders better as a full page than nested deep in toggles.
 
-**Sidebar consequence:** the parent's sidebar children list will accumulate one entry per day plus Run Log / Incidents / Preferences. After a year of use, ~365 day sub-pages live flat under the parent in the sidebar. This is by design — sidebar is not the primary navigation surface; the parent page body's Year/Month toggle structure is.
+**Sidebar consequence:** the parent's sidebar children list will accumulate one entry per day plus Run Log / Incidents / Fixed-Cost Registry / Preferences. After a year of use, ~365 day sub-pages live flat under the parent in the sidebar. This is by design — sidebar is not the primary navigation surface; the parent page body's Year/Month toggle structure is.
 
 ## Static elements (always present)
 
@@ -96,11 +97,11 @@ The header is the only static, persistent block at the very top of the parent bo
 - **Detail pages:** each row in the inline database opens a child page whose schema is in `schemas/run-log-detail-page.md`. Detail pages are nested as children of THIS sub-page (not of the parent), which keeps the parent tidy.
 - **Lifecycle:** created on first preflight if missing (per `preflight.md` Step 6). Once it exists, the writer (`writers/run-log.md`) appends a row on every fire.
 
-### 3. Incidents sub-page — between Run Log and Preferences
+### 3. Incidents sub-page — between Run Log and Fixed-Cost Registry
 
 - **Title:** exactly `Incidents`.
 - **Notion-tree parent:** the parent page.
-- **Body location on parent:** between Run Log and Preferences.
+- **Body location on parent:** between Run Log and Fixed-Cost Registry.
 - **Contents:** an append-only inline Notion database. No header callout required — the title is self-explanatory. Columns:
 
   | Column              | Type                       | Notes                                                                                       |
@@ -119,7 +120,15 @@ The header is the only static, persistent block at the very top of the parent bo
 - **Read on every fire:** preflight loads unresolved incidents and surfaces them in the new run-log entry's "Pre-existing unresolved incidents" field, so each fire is aware of standing failures.
 - **Escalation:** 3+ consecutive unresolved incidents on the same `MCP` trigger an email escalation to the backup person — already documented in `connector-failure-notify.md`.
 
-### 4. Preferences sub-page — always last
+### 4. Fixed-Cost Registry sub-page — between Incidents and Preferences
+
+- **Title:** exactly `Fixed-Cost Registry`.
+- **Notion-tree parent:** the parent page.
+- **Body location on parent:** between `Incidents` and `Preferences`.
+- **Contents:** fixed-cost tracking snapshot + Client-Ask Ledger — see `schemas/fixed-cost-registry.md`.
+- **Lifecycle:** created on first preflight if missing (per `preflight.md` Step 6), like `Preferences`. Refreshed every Mode 1 fire.
+
+### 5. Preferences sub-page — always last
 
 The `Preferences` sub-page is the very last child of the parent (sidebar tree) and the last block on the parent body. Position is enforced by:
 
@@ -185,6 +194,7 @@ HEADER CALLOUT
    ...
 📒 Run Log         (child_page block — sub-page)
 🚨 Incidents       (child_page block — sub-page)
+💰 Fixed-Cost Registry (child_page block — sub-page)
 ⚙️ Preferences     (child_page block — sub-page)
 ```
 
@@ -219,12 +229,13 @@ The parent body has these ordered top-level blocks:
 | 2  | Current Year toggle              | Heading-1 toggle                  | Mode 1 / writers/notion.md on demand              | Newest year at top. Contains Month toggles.            |
 | 3  | Earlier Year toggles             | Heading-1 toggle                  | Prior Mode 1 runs in those years                  | Descending year order.                                 |
 | 4  | `Run Log` sub-page link          | `child_page` block                | `preflight.md` Step 6 (creates if missing)        | Below all Year toggles, above `Incidents`.             |
-| 5  | `Incidents` sub-page link        | `child_page` block                | `preflight.md` Step 6 OR Tier 4 of failure path   | Between `Run Log` and `Preferences`.                   |
-| 6  | `Preferences` sub-page link      | `child_page` block                | PM-curated; position enforced                     | Always last.                                           |
+| 5  | `Incidents` sub-page link        | `child_page` block                | `preflight.md` Step 6 OR Tier 4 of failure path   | Between `Run Log` and `Fixed-Cost Registry`.           |
+| 6  | `Fixed-Cost Registry` sub-page link | `child_page` block             | preflight creates if missing, Mode 1 refreshes    | fixed-cost tracking snapshot + Client-Ask Ledger — see `schemas/fixed-cost-registry.md` |
+| 7  | `Preferences` sub-page link      | `child_page` block                | PM-curated; position enforced                     | Always last.                                           |
 
 **Hierarchy nesting on parent body:** Year toggles contain Month toggles (descending), Month toggles contain dated `child_page` blocks (descending). The parent body itself only ever has the blocks listed in the table above — nothing else.
 
-**Sidebar tree under the parent (informational):** all dated sub-pages flat (one per day), plus the three operational sub-pages (Run Log, Incidents, Preferences). Run Log detail pages are children of Run Log (not parent). Row detail pages are children of their respective dated sub-page (not parent). The sidebar is informational; navigation happens via the parent body.
+**Sidebar tree under the parent (informational):** all dated sub-pages flat (one per day), plus the four operational sub-pages (Run Log, Incidents, Fixed-Cost Registry, Preferences). Run Log detail pages are children of Run Log (not parent). Row detail pages are children of their respective dated sub-page (not parent). The sidebar is informational; navigation happens via the parent body.
 
 Mode 1's Notion writer enforces this order. `preflight.md` Step 6 creates `Run Log` and `Incidents` in the correct slot if either is missing on a routine fire. Monthly archival verifies (rather than reshuffles) the structure since placement is correct from creation. If a PM manually rearranges, the next routine fire silently re-sorts top-level blocks and toggle children; flat dated/month pages found at the parent level are flagged in the run-log for PM review rather than auto-moved.
 

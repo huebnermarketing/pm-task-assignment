@@ -69,7 +69,7 @@ The first line under the heading is the **Triggered-by line** — built from `ro
 **Triggered by:** <source label> — <author_name> @ <timestamp_local> — "<excerpt one-line>" [Open link](<source_url>)
 ```
 
-Source label per `anchor.source`: `orbit_comment` → `Orbit comment`, `orbit_task_body_update` → `Orbit task update`, `orbit_status_change` → `Orbit status change`, `orbit_due_date_change` → `Orbit due-date change`, `orbit_due_today` → `Orbit — due today`, `gmail_message` → `Gmail`, `fathom_meeting` → `Fathom meeting`.
+Source label per `anchor.source`: `orbit_comment` → `Orbit comment`, `orbit_task_body_update` → `Orbit task update`, `orbit_status_change` → `Orbit status change`, `orbit_due_date_change` → `Orbit due-date change`, `orbit_due_today` → `Orbit — due today`, `orbit-mail` → `Orbit notification mail` (a signal anchored on a parsed `origin: fixed_cost_mail` mail, `collectors/gmail.md` § Orbit-notification mails), `gmail_message` → `Gmail`, `fathom_meeting` → `Fathom meeting`.
 
 Examples:
 
@@ -177,6 +177,11 @@ Inside the toggle:
 - Cross-source match reasoning
 - Any debug info or metadata
 - Links to prior instances of this type of item (for adaptive learning lookup)
+- Fixed-cost follow-up reminder rows (`fc_row_type: follow_up_reminder`) additionally
+  include an `ask_key: <value>` line — machine-readable, matches the `fc_state` key exactly
+  (`synthesis/fixed-cost-state.md` § FC-3). Mode 2's note-interpreter reads it from here to
+  locate the Client-Ask Ledger row when resolving/snoozing (`writers/notion.md` § Flow —
+  Mode 2 ledger touch). The PM never needs to read this line.
 
 The toggle stays closed by default. The PM never needs to open it. The skill reads from this toggle during Mode 2 when interpreting a PM note — the full context lives here.
 

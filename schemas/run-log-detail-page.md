@@ -48,6 +48,16 @@ Primary collector line format: `[name]: [count] signals, [status]`. Fathom line 
 
 If a primary collector failed, the status is `FAILED — <one-line reason>`. If Fathom failed, the status is `FAILED (non-blocking) — <one-line reason>`.
 
+### 2.5 Fixed-cost lane stats section (Mode 1 only)
+
+Heading: `Fixed-cost lane stats`. One-line summary rendered from `fixed_cost_stats`:
+
+```
+discovery: filtered, projects: 6, signals: 14, asks opened: 2, asks resolved: 1, reminders: 3 emitted / 1 suppressed (unverified), pings: 2 emitted / 1 throttled / 1 dropped (insufficient specifics), pulse movement: 4 projects, source: mail-primary, audits: 5, mail signals: 9, gaps: 1
+```
+
+Omitted entirely when the fixed-cost lane is off or empty for this run (`fixed_cost_stats == null`) — do not render an empty heading. Per-item suppression/drop lines live in the `Decisions` section below, not here (see `writers/run-log.md` Step 3 item 3).
+
 ### 3. Decisions section
 
 Heading: `Decisions`. One bullet per item written to the queue. Format:

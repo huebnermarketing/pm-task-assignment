@@ -17,8 +17,8 @@ PM Automation MVP 1/
 ├── first-run-setup.md               ← 9-field conversational/template setup
 ├── invocation-commands.md           ← command syntax + lenient routing
 ├── modes/                           ← Mode 1 (with Step 3a Orbit-first priority pass), Mode 2, monthly archival
-├── collectors/                      ← Orbit, Gmail (primary collection); Fathom (enrichment-on-demand, lazy)
-├── synthesis/                       ← matcher (Job 4b Pass 1 Gmail cross-link + Pass 2 Fathom enrichment fetch), pod inference, note interpreter
+├── collectors/                      ← Orbit (primary collection + fixed-cost discovery/activity lane), Gmail (primary collection); Fathom (enrichment-on-demand, lazy)
+├── synthesis/                       ← matcher (Job 4b Pass 1 Gmail cross-link + Pass 2 Fathom enrichment fetch), pod inference, note interpreter, fixed-cost-state.md (Job 4c fixed-cost tracker)
 ├── executors/                       ← Orbit, Email (sent-email exceptions), Slack (outbound-send only)
 ├── writers/                         ← Notion writer, plain-language splitter, source citation
 ├── schemas/                         ← parent page, Preferences, Morning Queue DB, row detail, Orbit DQ
@@ -78,7 +78,7 @@ All answers are written to the `Preferences` sub-page at the bottom of the Notio
 
 ## What happens every morning (after setup)
 
-- **9:30 AM IST** (or your configured time): Mode 1 fires. Skill runs Step 3a (Orbit-first priority pass — AM-handed parent tasks due today) then Step 3b (parallel Orbit-normal + Gmail). Synthesizes. During synthesis the matcher lazily fetches Fathom enrichment for any signal that references a meeting (no eager Fathom collection). Writes today's dated sub-page at the top of your Notion parent with an inline Morning Queue database — priority-lane rows sort at the top. No prompts. No input required.
+- **9:30 AM IST** (or your configured time): Mode 1 fires. Skill runs Step 3a (Orbit-first priority pass — AM-handed parent tasks due today) then Step 3b (parallel Orbit-normal + Gmail). Synthesizes. During synthesis the matcher lazily fetches Fathom enrichment for any signal that references a meeting (no eager Fathom collection). Writes today's dated sub-page at the top of your Notion parent with an inline Morning Queue database — priority-lane rows sort at the top. Your Active + Fixed-Cost projects are also tracked project-wide (not just your assigned tasks) — overnight movement surfaces as follow-up-reminder / stale-work-ping Flag rows plus a passive Fixed-Cost Pulse toggle on the page, backed by the Fixed-Cost Registry sub-page. No prompts. No input required.
 - **You at \~10:00 AM**: Open Notion. Read the queue. For each row, either flip Status to `Approved`, drop a note in PM Notes (including the optional `send` note + audience match if you want Slack auto-send), or leave it at `Recommended Action` or `Skip. No Action Needed`. Flip the `Ready for Execution` toggle at the top when done.
 - **10:45 AM IST** (or your configured time): Mode 2 fires. Reads the Ready toggle. If ON, executes every `Approved` row and every row with a note. Writes Done outcomes. Writes a completion-summary callout block at the top of today's dated page (no DM — you're already in Notion).
 - **If Ready toggle is OFF at 10:45**: Skill emails your configured escalation backup with a link to the page.

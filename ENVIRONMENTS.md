@@ -57,6 +57,7 @@ These behaviors are identical across both surfaces:
 - Approval semantics: row Status + page-level `Ready for Execution` toggle in Mode 2
 - The Notion parent-page hierarchy `Parent → Year → Month → Date`
 - Run Log + Incidents writes
+- Fixed-Cost Registry writes
 - Failure-notify fallback chain
 
 Only the question-asking behavior differs. Everything else is one consistent skill, regardless of how it was launched.

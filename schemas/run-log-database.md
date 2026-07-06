@@ -33,6 +33,8 @@ The database is **brief by design**. Counts and statuses live here; reasoning li
 | `Errors`         | Number              | Connector failures + per-item execution errors. Counted, not described, here.               |
 | `Detail`         | URL (preferred) or Relation | Link to the `Run Log Detail` sub-page for this run. URL keeps the schema simpler; relation is acceptable if a separate `Run Log Details` database is used later. |
 
+**Note — `fixed_cost_stats`.** The Mode 1 fixed-cost lane stats object (`writers/run-log.md` input `fixed_cost_stats`) renders on the linked `Run Log Detail` sub-page only (see `schemas/run-log-detail-page.md` § Fixed-cost lane stats section). It does NOT get its own column on this database — the database stays brief-by-design; per-lane detail lives on the detail page.
+
 ### Status meanings
 
 - `OK` — all sources reachable, no per-item errors, run completed normally.

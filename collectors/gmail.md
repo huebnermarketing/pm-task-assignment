@@ -44,10 +44,19 @@ Run targeted searches — not a full inbox dump. All searches scoped to the WLIQ
 3. **Emails with attachments from client/agency senders** — `has:attachment after:<lookback>` filtered to senders matching known Orbit clients.
 4. **Threads with recent replies** — threads where the newest message is after `last_morning_run` AND the PM has previously participated. Use `gmail_read_thread` to verify.
 5. **Unsent drafts** — `gmail_list_drafts`. Carry-forward candidates.
+6. **Orbit notification mails for tracked fixed-cost projects** — `from:<Orbit
+   notification-from address> after:<lookback>`. Collected ONLY when the mail resolves to a
+   `registry_snapshot.tracked_projects[]` entry (see § Orbit-notification mails
+   (fixed-cost lane)). Skipped entirely when `registry_snapshot` is absent/empty.
 
 ## What to skip
 
-- **Orbit notification emails** — already covered by the Orbit collector. Detect via sender domain matching Orbit's notification-from address.
+- **Orbit notification emails** — skipped for the workload lane (already covered by the
+  Orbit collector), EXCEPT mails that resolve to a project in the run's
+  `registry_snapshot.tracked_projects[]` (fixed-cost lane, spec §11.2) — those are collected
+  and parsed per § Orbit-notification mails (fixed-cost lane) below. Detect via sender
+  domain matching Orbit's notification-from address; all non-tracked Orbit notification
+  mails stay excluded exactly as before.
 - **Newsletters and marketing emails** — detect via `list-unsubscribe:` header, `noreply@` senders, well-known marketing domains.
 - **Automated tool notifications** — GitHub, CI/CD alerts, third-party chat digests, calendar notifications.
 - **Internal WLIQ blasts** that aren't addressed to the PM directly.
@@ -167,6 +176,51 @@ Every Gmail signal carries a `context_link` object so `synthesis/matcher.md` Job
 - **`timestamp`** — ISO datetime of the latest message in the thread. Used for Job 4b's ±24h time-proximity rule when matching against Orbit events.
 
 The collector populates `context_link` on EVERY Gmail signal regardless of whether the matcher actually links it later. This is cheap — the data is already extracted during normal collection.
+
+## Orbit-notification mails (fixed-cost lane)
+
+Spec §11.2. The main routine passes `registry_snapshot` into this collector at dispatch
+(same object the Orbit collection sub-agent receives). This section activates ONLY when
+`registry_snapshot.tracked_projects[]` is non-empty.
+
+**Scope gate.** For each Orbit notification mail in the lookback window, resolve the
+project: match `#<project_number>` in subject/body first, tracked-project title substring
+second. Resolves to a tracked project → collect. No match → skip (NOT an error — it is
+another PM's project or an untracked type; the workload-lane exclusion still applies).
+Ambiguous match (two tracked titles match, no number) → skip + emit
+`fc_mail_parse_failure` incident naming the subject. Never guess.
+
+**Parse per mail** (subject + body HTML):
+
+| Field | Source |
+|---|---|
+| `project_id`, `project_number` | scope-gate resolution against `registry_snapshot` |
+| `task_title` | task name in subject/body (Orbit templates embed it; null for project-level events) |
+| `event_type` | one of `comment | status | assignment | due-date | attachment | task-created | task-completed` (map from the template's action phrase) |
+| `actor` | the acting user named in the mail |
+| `excerpt` | first ~200 chars of the event body (comment text, status old→new, etc.), HTML-stripped |
+| `timestamp` | the mail's Date header (IST) |
+
+A mail that cannot be parsed into at least `{project, event_type, actor, timestamp}` →
+`fc_mail_parse_failure` incident (subject included) + skip that mail; the run continues.
+
+**Signal shape.** Each parsed mail becomes one signal tagged `origin: fixed_cost_mail`,
+mirroring an Orbit activity signal, with `latest_signal` built from the mail itself
+(`{source: "orbit-mail", actor, timestamp, excerpt}`) — non-negotiable rule #24 holds.
+These signals carry the resolved `project_id`/`project_number` directly, so they do NOT go
+through Job 4b Pass 1b (already resolved) — they enter the matcher's Job 4c universe as
+first-class fixed-cost signals (`synthesis/matcher.md` § Job 4c).
+
+**Dedup responsibility** sits with the matcher (shadow mode runs both feeds): see
+`synthesis/matcher.md` § Job 4c shadow dedup. This collector does not dedup against Orbit.
+
+**Pulse rollup output.** The collector ALSO emits `mail_activity_summary[]`: one entry per
+tracked project that had ≥ 1 parsed notification mail this run — `{project_id,
+project_number, title, counts by event_type, newest_excerpt, newest_timestamp}`. This is a
+rollup of mails already parsed above — zero extra Gmail calls. Projects with no parsed mail
+this run are simply absent from the array (no zero-count entries). `writers/notion.md` §
+Step 5.7 uses this to compose the Fixed-Cost Pulse in mail-primary mode, when the unfiltered
+Orbit activity loop (and therefore `collectors/orbit.md`'s `activity_summary[]`) did not run.
 
 ## `awaiting_action_hint` — feeds the Possible-Orbit-miss trigger
 

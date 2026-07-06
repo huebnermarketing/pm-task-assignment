@@ -57,7 +57,7 @@ This step is non-blocking: a matrix outage must never block the morning queue, a
 
 The priority pass is a **local filter + cross-reference computation** over the MCP responses fetched by 1e (Orbit normal pass). It makes ZERO new MCP calls of its own — it reuses 1e's `get_user_workload(PM)`, the per-project `get_activity_log` loop, and the cached `get_primary_account_manager_users` response (AM identity). The "sequential, BLOCKING" framing from earlier spec versions was a defensive correctness measure for the dependency between this pass and matcher Job 1; that dependency is now encoded explicitly at the matcher entry point, not at the Step 1 launch point.
 
-**Launch model:** 1c (Pod Matrix), 1e (Orbit MCP fetch), and 2a (Gmail collector) fan out together right after 1b completes. 1d runs as a synchronous local computation as soon as 1e's MCP responses land — typically a few hundred milliseconds of filtering, no network. 2a does NOT wait for 1d to complete; it has no dependency on Orbit responses. The join point is 1f (post-collector assertion), which gates on `{1c, 1e (with 1d filtered output), 2a}` all completing.
+**Launch model:** 1c (Pod Matrix), 1e (Orbit MCP fetch), and 2a (Gmail collector) fan out together right after 1b completes. 1d runs as a synchronous local computation as soon as 1e's MCP responses land — typically a few hundred milliseconds of filtering, no network. 2a does NOT wait for 1d to complete; it has no dependency on Orbit responses. The join point is 1f (post-collector assertion), which gates on `{1c, 1e (with 1d filtered output), 2a}` all completing — plus, when the § 2a mail-primary Gmail-failure fallback fires, the supplemental Orbit dispatch it adds to the fan-out (see § 1f).
 
 **Matcher entry-gate:** Matcher Job 1 reads `priority_signals[]` first (per Sort rule 0). It will not start until 1d's local-filter computation has completed and populated `priority_signals[]`. This dependency is encoded at the consumer (matcher entry), not enforced by artificially blocking 2a.
 
@@ -74,9 +74,12 @@ If Preferences has zero AMs configured, the priority pass returns an empty list.
 
 Launches in parallel with 1c, 1d (which is a local filter over this pass's MCP responses), and 2a (Gmail collector). 1e is the **only** Orbit MCP-fetching step in Step 1 — 1d reuses its responses without making new calls.
 
-**Dispatch as a collection sub-agent (context isolation).** 1e runs `collectors/orbit.md` as a **sub-agent** (Task tool). The bulk raw responses — the up-to-500-task `get_user_workload` dump and the per-project `get_activity_log` logs — stay inside the sub-agent's context and never enter the main routine's context window. The sub-agent returns only the distilled `priority_signals[]` + `orbit_signals[]` (plain text), the `relationship_map` (no raw bodies/comments), the `workload_summary` aggregates, resolved `AM_user_ids`, and explicit assertion flags (`workload_fetched`, `activity_log_projects_queried`). See `collectors/orbit.md` § Execution model. The per-row deep-read (`get_task_details`) is NOT done here — it fires later in the matcher's Job 7, in the main context, on the post-filter survivor set.
+**Dispatch as a collection sub-agent (context isolation).** 1e runs `collectors/orbit.md` as a **sub-agent** (Task tool). The bulk raw responses — the up-to-500-task `get_user_workload` dump and the per-project `get_activity_log` logs — stay inside the sub-agent's context and never enter the main routine's context window. The sub-agent returns only the distilled `priority_signals[]` + `orbit_signals[]` (plain text), the `relationship_map` (no raw bodies/comments), the `workload_summary` aggregates, resolved `AM_user_ids`, `fixed_cost_projects[]` + `discovery_mode` + `discovery_succeeded` + `fixed_cost_activity_loop_ran` + per-project `activity_summary[]` + per-project `open_task_roster[]` from the fixed-cost lane (§ Fixed-cost extension), and explicit assertion flags (`workload_fetched`, `activity_log_projects_queried`, `discovery_mode`, `discovery_succeeded`). See `collectors/orbit.md` § Execution model. The per-row deep-read (`get_task_details`) is NOT done here — it fires later in the matcher's Job 7, in the main context, on the post-filter survivor set.
+
+**`registry_snapshot` pass-through.** The collector never reads Notion itself. After preflight, the main routine reads the Fixed-Cost Registry sub-page once (Tracked Projects — filter rows + manual pins, `last_successful_discovery`, the Client-Ask Ledger, and the `fc_state` block — including parsing its `Activity source: <shadow | mail-primary>` and `Clean audits: <n>` header fields at this same read; missing → `shadow` / `0`) and passes the resulting `registry_snapshot` object into BOTH the 1e Orbit collection sub-agent AND the 2a Gmail collector at dispatch time. The 1e sub-agent uses `registry_snapshot`'s manual pins to union into its discovery set, its `last_successful_discovery` to decide whether a fallback sweep is overdue, and its `activity_source` / `clean_audits` to gate the fixed-cost half of the merged activity loop (`collectors/orbit.md` § Fixed-cost extension). The 2a Gmail collector consumes only `registry_snapshot.tracked_projects[]` for its scope gate — it stays Gmail-MCP-only and, like 1e, makes zero Notion calls of its own.
 
 - `collectors/orbit.md` (normal pass — `priority_pass = false`) — universe is `get_user_workload(PM_user_id, is_completed=incomplete, per_page=500)` returning every open task assigned to the PM plus the precomputed `workload_summary` (including the deduped `by_project[]` set). Activity since `last_run_timestamp` comes from `get_activity_log` — which **requires a `project_id`**, so it is looped once per project in `workload_summary.by_project[]` (`user_id=PM`, `startdate=last_run` as YYYY-MM-DD, `timezone=Asia/Kolkata`, paged on `has_more`). Tasks surfaced in `priority_signals[]` by 1d's filter are deduplicated by `task_id` from the normal-pass output. **No per-project task-list iteration** — the workload call replaces the old `list_projects` + `get_project_task_list × N` loop entirely; the only per-project loop is the date-bounded `get_activity_log` over the workload's own project set. See `collectors/orbit.md` § Universe model for the rationale and § MANDATORY tool call sequence for the exact tool order.
+- **Fixed-cost discovery (same sub-agent, same pass).** For Active + Fixed-Cost projects where `development_owner == PM`, the collector runs a project-scoped `list_projects(type_name="Fixed Cost", status_name="Active", development_owner_id=PM)` discovery call behind a mandatory filter guard, unions in the manual pins carried on `registry_snapshot` (passed in, not fetched), and folds the result into the activity loop. The unfiltered per-project `get_activity_log` half runs per the `activity_source` gate (`collectors/orbit.md` § Fixed-cost extension) — shadow mode, monthly re-audit, or Gmail-failure fallback only; the `get_project_task_list` roster call per tracked project stays unconditional. Output: `fixed_cost_projects[]` + `discovery_mode` (`filtered` | `fallback-sweep`). See `collectors/orbit.md` § Fixed-cost extension.
 
 **Fathom is NOT called in this step.** Fathom is enrichment-only and is invoked lazily by the matcher during Step 3 (Enrich with Fathom) whenever it detects a meeting reference inside a primary signal. See `collectors/fathom.md` for the enrichment interface and trigger-phrase list.
 
@@ -89,7 +92,7 @@ This note is included in the summary section at the top of the dated page.
 
 #### 1f. Post-collector assertion (MANDATORY — explicit join point for the fan-out)
 
-**This sub-step is the join point for the Step 1 + Step 2 fan-out launches.** 1c (Pod Matrix), 1d (priority-pass filter, which depends on 1e MCP responses), 1e (Orbit MCP fetch), and 2a (Gmail collector) all run in parallel; 1f does not start until ALL of them have completed (or failed-and-logged). Once 1f passes (or aborts), Mode 1 advances to Step 3 (Fathom enrichment) and Step 4 (synthesis). Matcher Job 1 entry then reads `priority_signals[]` first (per Sort rule 0) — that dependency is encoded at the matcher consumer, not at the producer.
+**This sub-step is the join point for the Step 1 + Step 2 fan-out launches.** 1c (Pod Matrix), 1d (priority-pass filter, which depends on 1e MCP responses), 1e (Orbit MCP fetch), and 2a (Gmail collector) all run in parallel; 1f does not start until ALL of them have completed (or failed-and-logged). If 2a's mail-primary hard-fail fallback dispatched a supplemental Orbit sub-agent (§ 2a), that dispatch joins this fan-out as an added member — 1f waits for it the same way. Once 1f passes (or aborts), Mode 1 advances to Step 3 (Fathom enrichment) and Step 4 (synthesis). Matcher Job 1 entry then reads `priority_signals[]` first (per Sort rule 0) — that dependency is encoded at the matcher consumer, not at the producer.
 
 Before passing signals to the matcher (Step 4), verify the Orbit collector actually invoked its non-skippable tool sequence in 1e (which 1d also depends on). Because 1e runs as a collection sub-agent, the main routine reads the **assertion flags the sub-agent returns** (`workload_fetched`, `activity_log_projects_queried`, and the `workload_summary.by_project[]` count) rather than re-inspecting a raw tool trace. This guards against the sub-agent taking a "fast path" that pulls workload metadata only and silently drops every comment + activity-log entry inside the lookback window.
 
@@ -105,7 +108,9 @@ Run the following checks on the Mode 1 tool trace and Orbit signals list:
 
 4. **Tool trace MUST show `get_user_workload(PM_user_id, ...)` — and SHOULD show `get_user_workload(candidate_user_id, ...)` only on the no-history fallback path.** Per `SKILL.md` non-negotiable rule #6 there are two valid uses of `get_user_workload`: (a) PM-workload universe discovery in this collector (always fires, checked by assertion #1), (b) candidate-availability scoring in `synthesis/pod-inference.md` on the matcher Job 6 no-history fallback path (lazy). If `get_user_workload` was called with a `user_id` other than the PM AND no matcher Job 6 no-history fallback path actually fired this run, log warning `orbit_workload_candidate_call_unexpected` and continue. This catches accidental candidate-availability fan-out.
 
-Output of this step: either a hard abort (cases 1 or 2) or a clean signals list with warnings logged (cases 3–4). Only on clean pass does synthesis run.
+5. **`discovery_mode` must be `filtered`, `fallback-sweep`, or absent-with-a-matching-Incident.** This checks that the fixed-cost discovery lane ran or consciously fell back (§ Fixed-cost extension). `filtered` / `fallback-sweep` both count as "ran." `discovery_mode` absent is legitimate ONLY when the lane's Failure posture fired (discovery call failed after retries) — the sub-agent must also return the Incident it logged, and this is a soft-degrade (workload-only), not a hard abort. `discovery_mode` absent with no corresponding Incident means discovery was silently skipped — hard abort, same treatment as case 1/2.
+
+Output of this step: either a hard abort (cases 1, 2, or 5) or a clean signals list with warnings logged (cases 3–4). Only on clean pass does synthesis run.
 
 ### Step 2 — Pull from Mail
 
@@ -115,7 +120,7 @@ The four-step PM flow's second conceptual step. Covers: Gmail collection, plus a
 
 Fires in parallel with 1e (Orbit normal pass) — they are independent, do not wait. Same lookback window as 1e (`<lookback_window>` from 1b).
 
-- `collectors/gmail.md` — scoped to PM's WLIQ inbox, last <lookback_window>. Also emits `context_link` metadata per signal so matcher Job 4b can cross-link to Orbit signals.
+- `collectors/gmail.md` — scoped to PM's WLIQ inbox, last <lookback_window>. Also emits `context_link` metadata per signal so matcher Job 4b can cross-link to Orbit signals, and (fixed-cost lane) a per-project `mail_activity_summary[]` rollup that `writers/notion.md` § Step 5.7 uses to compose the Fixed-Cost Pulse in mail-primary mode.
 
 **Role of Gmail — three duties, all default-on.** Gmail serves three purposes simultaneously, all of which apply to every Mode 1 run regardless of how the Orbit signals look:
 
@@ -129,6 +134,20 @@ If Gmail fails (MCP unavailable, auth expired), do not abort Mode 1. Log a note 
 > "Gmail was unavailable this morning — you may want to check manually."
 
 This note is included in the summary section at the top of the dated page.
+
+**Gmail-collector failure in mail-primary mode (spec §11.3).** If `Activity source:
+mail-primary` and the 2a Gmail collector hard-fails (after its existing retries), the
+fixed-cost lane must not run blind: dispatch ONE supplemental Orbit sub-agent scoped to
+the fixed-cost activity loop only (unfiltered `get_activity_log` per tracked project,
+shadow-mode shape; no discovery, no workload, no roster — those already ran in 1e),
+passing `gmail_collector_failed: true` so its Activity-source gate
+(`collectors/orbit.md` § Fixed-cost extension) fires the unfiltered loop despite
+mail-primary, log the incident, and continue. This supplemental dispatch becomes an added
+member of the 1f fan-out: 1f does not pass until it completes (or fails-and-logs — in
+which case the fixed-cost lane degrades to no activity feed this run and FC-0 skips).
+The mode is NOT flipped by a one-off failure. In shadow mode a
+Gmail failure needs no fallback (the Orbit loop already ran); FC-0 simply skips (single
+feed).
 
 #### 2b. Possible-Orbit-miss safety-net (cross-reference to matcher)
 
@@ -168,6 +187,8 @@ Feed all collected signals (Orbit priority-lane + Orbit normal-pass + Gmail, eac
 - **Job 4 — Generate the one-line summary.** Topic-style — names the deliverable / scope, NOT the PM action. Verb lives in `Recommended Action` column only. Per the matcher's locked-vocabulary rules (5 verbs in `Recommended Action`: `Create subtask`, `Reopen subtask`, `Hand off parent task`, `Flag`, `Create parent task`).
 - **Job 4b Pass 1 — Gmail → Orbit cross-link (default-on enrichment).** For EVERY Orbit signal (priority-lane and normal-pass), scan Gmail signals for corroborating context via project_id / actor_emails / topic_keywords / ±7-day time proximity, and attach matched Gmail signals as `context_signals[]` on the Orbit signal. The Gmail collector pulls the full thread end-to-end per `collectors/gmail.md` § Full thread context, so each attached signal carries every message in the thread — Job 7 reads through them when composing the proposed Orbit body. The bias is over-include — even weak matches attach. Cross-linking is additive — the same Gmail signal may also become its own row if it contains a fresh ask.
 
+**Job 4c — Fixed-cost state tracker (delegated), runs after 4b and before Job 5.** `synthesis/fixed-cost-state.md` walks FC-1 resolution scan → FC-2 ask detection → FC-3 follow-up reminders → FC-4 stale-work pings over the widened Job 4c input universe — `origin: fixed_cost_registry` signals from Step 1's merged activity loop, `origin: fixed_cost_mail` signals from 2a's notification-mail parsing, and Gmail signals cross-linked (Pass 1) or standalone-resolved (Pass 1b) against the tracked set (authoritative definition: `synthesis/matcher.md` Job 4c). The main routine passes the same `registry_snapshot` it read at 1e into the matcher for Job 4c — that is how the Client-Ask Ledger and `fc_state` block reach this tracker. On dual-feed runs (every shadow-mode Friday, and the mail-primary first-Friday monthly re-audit), Job 4c runs FC-0 — the Friday coverage audit — before FC-1: per tracked project it compares the Orbit activity feed against the parsed notification-mail feed and records any coverage gaps. FC-0's verdict travels in `fc_state_patch` (`activity_source_next` / `clean_audits_next`): the Notion writer applies any shadow ↔ mail-primary header flip during the registry refresh at step 4c (Write to Notion), and the flip's audit string surfaces as a Run Log decision-trace line at 4e. It does not write to Notion itself — it returns `fc_output = { row_candidates[], ledger_mutations[], fc_state_patch }`. `row_candidates[]` (`fc_row_type: follow_up_reminder | stale_work_ping`) join the Job 5 input set below; `ledger_mutations[]` + `fc_state_patch` are held in memory and applied by `writers/notion.md` § Flow — refreshing the Fixed-Cost Registry during the Notion-write sub-step later in this same run (§ 4c Write to Notion). Registry unavailable this run → skip silently, non-blocking.
+
 #### 4b. Matcher Jobs 5, 6, 7, 8, 9, 10, 11
 
 - **Job 5 — Recommend action.** Pick exactly one of five locked verbs via Job 5 + 5a + 5.5: `Create subtask` (pod-resource work_type, no existing open subtask of same type), `Reopen subtask` (existing subtask of matching work_type found by Job 5.5), `Hand off parent task` (non-pod work_type: AUDIT, QUOTE, SEO, DESIGN, CONTENT, BA — parent reassigned to pool leader; no subtask), `Flag` (PM-attention only), `Create parent task` (Possible Orbit miss). Priority-lane signals always become `Create subtask` or `Reopen subtask` rows with `parent_task_id` PINNED to `signal.parent_task_id`.
@@ -190,6 +211,8 @@ Feed all collected signals (Orbit priority-lane + Orbit normal-pass + Gmail, eac
 
 #### 4c. Write to Notion
 
+(Orchestration step 4c — not `synthesis/matcher.md` Job 4c, the fixed-cost state tracker, which already ran during synthesis in 4a above.)
+
 Call `writers/notion.md` to:
 1. Archive last month's dated pages if today is the 1st (route to `modes/monthly-archival.md` first, then return)
 2. Ensure `Preferences` sub-page is positioned at the very bottom of the parent
@@ -199,6 +222,7 @@ Call `writers/notion.md` to:
    b. **Summary line** — "N items for your morning. X sub-tasks, Y flags. <M signals filtered — see Run Log if you want to audit>."
    c. **Inline Morning Queue database** — schema from `schemas/morning-queue-database.md`, one row per item. **The queue is a real Notion database (`notion-create-database` + DB rows), NEVER page-body markdown headings.** Rendering rows as `### Row N — …` / `**Project:** …` blocks in the dated page body is a FAILED run — see `writers/notion.md` Step 5 item 4 HARD RULE.
    d. **Verification gate** — `writers/notion.md` Step 6.5 re-fetches the dated page and proves the database exists with one row per item before the run may report `OK`. The gate emits `notion_write_assertions` (db_created, db_row_count_matches, row_detail_pages_created, no_markdown_row_dump, single_db), passed to 4e below. A failed assertion forces `Status = Failed`.
+   e. **Fixed-Cost Pulse toggle + registry refresh** — below the database, render the passive `Fixed-Cost Pulse` toggle (per-project overnight-movement counts, no verbs/assignees) and refresh the Fixed-Cost Registry sub-page (Tracked Projects reconciled against today's discovery set, Client-Ask Ledger updated with `fc_output.ledger_mutations` + `fc_output.fc_state_patch` returned by matcher Job 4c, `fc_state` block rewritten). See `writers/notion.md` § Step 5.7 and § Flow — refreshing the Fixed-Cost Registry.
 5. For each row, populate the detail page with the heading-based layout from `schemas/row-detail-page.md`:
    - Summary heading
    - Sources heading (with citations from `writers/source-citation.md`)
@@ -220,8 +244,9 @@ Update the Preferences page's `last_morning_run` field to now.
 Call `writers/run-log.md` with the run summary:
 - Timestamp range (start → end of this Mode 1 fire)
 - Source counts per primary collector (Orbit / Gmail signal counts) + Fathom enrichments fetched (N enrichments attached, M references unresolved, K resolved via gmail-attachment fallback)
+- Fixed-cost lane stats (Mode 1 only): discovery mode (`filtered` | `fallback-sweep`), projects tracked, signals seen, asks opened/resolved, reminders emitted/suppressed, pings emitted/throttled/dropped, `pulse_projects_with_movement` (count of tracked projects with non-zero overnight activity, rendered in the Fixed-Cost Pulse toggle), plus `activity_source` (value after this run's patch), `clean_audits` (value after this run's patch), `mail_signals` (count of `origin: fixed_cost_mail` signals collected), `coverage_gaps` (FC-0 gaps this run, 0 when FC-0 didn't run — the length of `fc_state_patch.coverage_gaps[]`; the full gap records `{project_number, task_title, event_type, orbit_timestamp}` are passed to the run-log writer alongside the audit strings so it renders one decision-trace line per gap) — see `writers/run-log.md`
 - Item count written to today's queue
-- Decisions list (key synthesis decisions, especially `Uncertain:` flags, `Possible Orbit miss:` flags, and assignee picks)
+- Decisions list (key synthesis decisions, especially `Uncertain:` flags, `Possible Orbit miss:` flags, and assignee picks) — plus, when the registry refresh changed `Activity source`, the activity-source flip audit string returned by `writers/notion.md` § Flow — refreshing the Fixed-Cost Registry (rendered by the run-log writer as its own decision-trace line)
 - Connector status (which MCPs were healthy, which degraded, which failed)
 - Page title actually written (including any `(rerun N)` suffix)
 - `notion_write_assertions` — the queue-structure assertion set from the 4c.d verification gate (`writers/notion.md` Step 6.5). **Required on every Mode 1 run.** The run-log writer renders these as a `Queue structure assertions` section and overrides `Status` to `Failed` if any assertion failed — so a markdown-dump run can never be recorded as `OK`.

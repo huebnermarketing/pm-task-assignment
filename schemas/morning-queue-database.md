@@ -354,7 +354,7 @@ When the schema needs to evolve (e.g., adding a column in a future version), use
 | Project | `2010 Solutions FTE Works (#16320)` |
 | Recommended Action | `Flag — PM owns next step (reply to Ellen). No Mode 2 action.` |
 | Recommended Assignee | `— (PM action)` |
-| Outcome | *(empty — Mode 2 does not execute Flag rows. PM marks Skip when resolved.)* |
+| Outcome | *(empty — Mode 2 does not execute Flag rows (exceptions: the three documented promotions and fixed-cost resolve/snooze ledger touches). PM marks Skip when resolved.)* |
 | PM Notes | *(empty)* |
 | Source Systems | `Gmail` |
 | Status | `Recommended Action` |

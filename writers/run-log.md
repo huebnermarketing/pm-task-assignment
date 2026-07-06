@@ -27,6 +27,23 @@ run_summary = {
   skipped:            [ { source, subject, reason }, ... ],
   uncertain:          [ { item, subject, candidates, reason }, ... ],
   connector_failures: [ { connector, step, error, tier }, ... ],
+  fixed_cost_stats:   {                                                 // Mode 1 only
+    discovery_mode:                    "filtered" | "fallback-sweep",
+    project_count:                     integer,
+    signal_count:                      integer,
+    asks_opened:                       integer,
+    asks_resolved:                     integer,
+    reminders_emitted:                 integer,
+    reminders_suppressed_unverified:   integer,
+    pings_emitted:                     integer,
+    pings_throttled:                   integer,
+    pings_dropped_insufficient_specifics: integer,
+    pulse_projects_with_movement:      integer,
+    activity_source:                   "shadow" | "mail-primary",     // value AFTER this run's patch
+    clean_audits:                      integer,                       // value AFTER this run's patch
+    mail_signals:                      integer,                       // origin: fixed_cost_mail signals collected
+    coverage_gaps:                     integer,                       // FC-0 gaps this run (0 when FC-0 didn't run) — length of fc_state_patch.coverage_gaps[]; the gap records travel alongside for the per-gap trace lines (Step 3)
+  },
   filtered_signals:   [ { source, summary, filter_reason, citations }, ... ],  // Mode 1 only — from matcher Job 11
   execution_outcomes: [ { row, task, outcome, pm_note_interp }, ... ],  // Mode 2 only
   notion_write_assertions: {                                            // Mode 1 only — from writers/notion.md Step 6.5 gate
@@ -73,14 +90,15 @@ Render the page body per `schemas/run-log-detail-page.md`. Sections in order:
 
 1. Header callout — one line: `<Mode> · <HH:MM>–<HH:MM> IST · <Status> · <signals> signals · <items_written> items · <errors> errors` (errors = `len(connector_failures) + count of execution_outcomes where outcome == "failed"` + `len(notion_write_assertions.failed_keys)`). For Mode 1, append a queue-structure marker to the line: `· queue ✅ db` when all assertions pass, or `· queue ⚠️ <failed_keys joined by ','>` when any failed.
 2. `Sources` — one bullet per `sources[i]` (omit section if `sources == []`).
-3. `Decisions` — one bullet per `decisions[i]`, formatted `Item N — [subject] → [action] → [reason]`.
-4. `Skipped` — one bullet per `skipped[i]` (omit if empty).
-5. `Uncertain` — one bullet per `uncertain[i]` (omit if empty).
-6. `Connector failures` — one bullet per `connector_failures[i]` (omit if empty).
-7. `Queue structure assertions` — Mode 1 only. One bullet per assertion key in `notion_write_assertions`, formatted `<key>: PASS | FAIL` followed by the observed value where relevant (`db_row_count_matches: PASS (6 rows == 6 items)`). This section is **never omitted on a Mode 1 run** — a healthy run shows positive evidence the database was built (all PASS), not just an absence of errors. Omit only for Mode 2 / Monthly Archival (where `notion_write_assertions == null`). If `failed_keys` is non-empty, prefix the section with a one-line callout: `⚠️ Queue was not written as a valid database — see failed assertions below.`
-8. `Filtered signals (N)` — Mode 1 only. Notion toggle block, **closed by default**. Inside: one bullet per `filtered_signals[i]`, formatted `<source> · <summary> · <filter_reason> · <citations>`. Omit the toggle entirely if `filtered_signals == []`. This is where the PM audits what the matcher dropped under the 5-verb output-gating rule (`synthesis/matcher.md` Output gating + Job 11).
-9. `Execution outcomes` — Mode 2 only; one bullet per `execution_outcomes[i]`.
-10. Footer — `Run Log database` link + queue-page-or-archived-toggle link.
+3. `Fixed-cost lane stats` — Mode 1 only. One-line summary: `discovery: <filtered|fallback-sweep>, projects: <N>, signals: <S>, asks opened: <A>, asks resolved: <R>, reminders: <E> emitted / <X> suppressed (unverified), pings: <P> emitted / <T> throttled / <D> dropped (insufficient specifics), pulse movement: <M> projects, source: <shadow|mail-primary>, audits: <clean_audits>, mail signals: <MS>, gaps: <G>`. Omit section if `fixed_cost_stats == null`. Each audit string the calling mode passes for a suppressed reminder or a dropped ping maps into its own decision-trace line in the `Decisions` section, formatted `[subject: ask key or task id] → [action: "reminder suppressed" | "ping dropped" | "ping dropped at render"] → [reason: the remainder of the audit string]`, e.g. `ask "logo assets" (#16046) → reminder suppressed → anchor unreadable (fail-closed)`. **Exception — `pings_throttled` is counted only.** A throttled ping (rate-limited, not suppressed or dropped for a content reason) does NOT get a per-item decision-trace line — it is reflected solely in the `pings_throttled` count in the summary line above. Each FC-0 coverage gap record the calling mode passes (from `fc_state_patch.coverage_gaps[]` — `{project_number, task_title, event_type, orbit_timestamp}`; the `fixed_cost_stats.coverage_gaps` integer above is that array's length) maps into its own decision-trace line, formatted `[subject: task title (#project_number)] → [action: "coverage gap"] → [reason: <event_type> seen in activity log, no mail counterpart]`. An activity-source flip audit string (passed by the calling mode when the registry refresh changed `Activity source` — `writers/notion.md` § Flow — refreshing the Fixed-Cost Registry item 2) likewise maps into its own decision-trace line, formatted `[subject: Fixed-Cost Registry] → [action: "activity-source flip"] → [reason: <shadow → mail-primary | mail-primary → shadow>, <clean_audits reached 2 | mail_coverage_gap on re-audit>]`.
+4. `Decisions` — one bullet per `decisions[i]`, formatted `Item N — [subject] → [action] → [reason]`.
+5. `Skipped` — one bullet per `skipped[i]` (omit if empty).
+6. `Uncertain` — one bullet per `uncertain[i]` (omit if empty).
+7. `Connector failures` — one bullet per `connector_failures[i]` (omit if empty).
+8. `Queue structure assertions` — Mode 1 only. One bullet per assertion key in `notion_write_assertions`, formatted `<key>: PASS | FAIL` followed by the observed value where relevant (`db_row_count_matches: PASS (6 rows == 6 items)`). This section is **never omitted on a Mode 1 run** — a healthy run shows positive evidence the database was built (all PASS), not just an absence of errors. Omit only for Mode 2 / Monthly Archival (where `notion_write_assertions == null`). If `failed_keys` is non-empty, prefix the section with a one-line callout: `⚠️ Queue was not written as a valid database — see failed assertions below.`
+9. `Filtered signals (N)` — Mode 1 only. Notion toggle block, **closed by default**. Inside: one bullet per `filtered_signals[i]`, formatted `<source> · <summary> · <filter_reason> · <citations>`. Omit the toggle entirely if `filtered_signals == []`. This is where the PM audits what the matcher dropped under the 5-verb output-gating rule (`synthesis/matcher.md` Output gating + Job 11).
+10. `Execution outcomes` — Mode 2 only; one bullet per `execution_outcomes[i]`.
+11. Footer — `Run Log database` link + queue-page-or-archived-toggle link.
 
 Apply the **brevity rules** (next section) to every reason field before rendering.
 

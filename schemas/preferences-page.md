@@ -349,6 +349,19 @@ for_each_am:
 
 Same as Pod Daily Task layout — unknown block types skip with log, illegal nesting renders as sibling with log, parse failure falls back to default layout, missing `for_each_am:` renders with no per-AM content and logs `am_layout_no_am_loop`.
 
+### H2: Fixed-Cost Tracking
+
+Controls the fixed-cost project lane (collectors/orbit.md § Fixed-cost extension +
+synthesis/fixed-cost-state.md).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `follow_up_reminder_days` | `7` | Days an open client ask waits before a follow-up Flag row (and between repeat reminders). |
+| `fixed_cost_stale_days` | `2` | BUSINESS days (Sat/Sun excluded) of zero activity before an assigned task on a tracked project earns a stale-work ping; also the re-ping throttle. |
+
+Absent section or keys → use defaults silently (first-run setup may omit it; the skill
+never blocks on these).
+
 ### H2: Always-Include Rules
 
 A bulleted list of free-text rules the PM provided during setup. Examples:

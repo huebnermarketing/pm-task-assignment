@@ -90,6 +90,7 @@ Per-verb required fields (the writer rejects malformed rows by moving them to `f
 - **`Reopen subtask`** — MUST carry `parent_task_id`, `existing_subtask_id`, `existing_subtask_title`, `new_work_description`, `work_type`. May carry `last_dev_user_id` (or null when Job 5.5 flagged inactive-dev edge — in which case AI Notes carries the `Uncertain:`).
 - **`Hand off parent task`** — MUST carry `parent_task_id`, `recommended_assignee_user_id` (the pool leader), `work_type` (which must be in `{AUDIT, QUOTE, SEO, DESIGN, CONTENT, BA}`). MUST NOT carry `task_title` or `proposed_orbit_body`.
 - **`Flag`** — MUST carry `pm_next_step`. MUST NOT carry `parent_task_id`, `task_title`, `assignee_id`, or `proposed_orbit_body`.
+- **`Flag` with `fc_row_type: stale_work_ping`** — additionally MUST carry the structured fields `stale_task_title`, `stale_assignee_name`, and `last_movement_excerpt` on the row candidate. The gate checks for the presence of these three fields directly — it does not parse the Summary/Task Brief prose for them. This mirrors the tracker-side generic-ping ban (`synthesis/fixed-cost-state.md` § FC-4) as defense in depth: any field missing/null → do NOT render the row (drop it, don't repair it), and write run-log audit line `ping dropped at render — insufficient specifics`. The `latest_signal_anchor` requirement above (rule 24) applies to this row exactly as to any other row, including `fc_row_type: follow_up_reminder` — no v3 carve-out from the Triggered-by gate.
 - **`Create parent task`** — MUST carry `project_id`, `task_title`, `proposed_orbit_body`, `assignee_id == PM_user_id`, `parent_task_id == null`.
 
 Cross-row consistency checks:
@@ -103,6 +104,36 @@ Any item failing these checks is moved from the items array to the `filtered_sig
 ### Step 5.6 — Render the row-detail Action Block
 
 For each item that survives Step 5.5, the writer renders the row's detail page with the Action Block callout at the very top (per `schemas/row-detail-page.md`). The callout is plain text — no emoji, no decorative glyphs. The verb word (`Create subtask`, `Reopen subtask`, `Hand off parent task`, `Flag for PM`, `Create parent task`) opens the first line in bold; subsequent lines carry structured fields. The action callout appears BEFORE the H1 Summary. The PM should not have to scroll past Sources or Recommended Action to find the proposed task title and assignee — that information is in the top callout.
+
+### Step 5.7 — Fixed-Cost Pulse toggle
+
+Below the Morning Queue database — the first block after the database (the Slack-handles reference block keeps its usual place above the database), render ONE toggle block:
+
+`Fixed-Cost Pulse — <N> projects, <M> with overnight movement`
+
+**Source selection.** When the run carries the Orbit fixed-cost activity loop's output
+(`fixed_cost_activity_loop_ran: true` — shadow mode, the monthly re-audit, or a
+Gmail-failure fallback), compose the Pulse from the Orbit collector's `activity_summary[]`
+exactly as below. Otherwise (mail-primary, ordinary day), compose it from the Gmail
+collector's `mail_activity_summary[]` instead: movement lines are built from its
+per-project event-type counts, still in rule-22 project format; tracked projects absent
+from the rollup (no parsed mail this run) collapse into the same no-movement tail line.
+Never sum the two sources on a day both are present — that double-counts; the Orbit copy
+wins (same precedence as the matcher's shadow dedup, `synthesis/matcher.md` § Job 4c).
+
+Inside, one line per project WITH movement (from whichever source this run selected;
+counts only, no deep-reads), rule-22 project format:
+
+`1828 Eng Landing (#15942) — 2 tasks completed, 3 comments, due Sep 10`
+
+Include only non-zero facts (skip "0 comments"). Then ONE collapsed tail line for the rest:
+`<K> projects — no overnight activity`. Zero tracked projects → render the toggle with the
+single line `No fixed-cost projects tracked` (or the header shows `0 projects`).
+`discovery_mode: fallback-sweep` this run → append ` · discovery: fallback` to the toggle
+title so the PM can see degraded discovery at a glance.
+
+The Pulse is passive visibility (spec §4.5): it never contains action verbs, assignees, or
+checkboxes — actionable items are queue rows, not pulse lines.
 
 ### Step 6 — Populate each row
 
@@ -133,7 +164,7 @@ For each item in the matcher's output array (after Step 5.5 gating):
    - `PM Next Step` heading + paragraph (Flag only)
    - `Proposed Handoff` heading + plain-language message (Create subtask / Reopen subtask / Hand off parent task)
    - `AI Notes` heading (if any notes). For priority-lane rows, AI Notes carries the matcher's `<AM> put this on your plate overnight, due today. Proposed delegate: <name> (<reason>).` line.
-   - Bottom toggle: `Reference Context for the Skill — working memory, not for review`, containing the full raw signals and pod inference reasoning
+   - Bottom toggle: `Reference Context for the Skill — working memory, not for review`, containing the full raw signals and pod inference reasoning. For a row carrying `fc_row_type: follow_up_reminder`, this toggle additionally includes a machine-readable `ask_key: <value>` line (the row candidate's `ask_key` field, `synthesis/fixed-cost-state.md` § FC-3) — the PM never needs to read or understand it; Mode 2's note-interpreter reads it back off this toggle when resolving/snoozing the ask (see § Flow — Mode 2 ledger touch below).
 
 ### Step 6.5 — Mandatory post-write structure verification (assertion gate)
 
@@ -147,7 +178,7 @@ After all rows and row-detail pages are written, the writer **re-fetches the dat
    | `db_created` | Exactly one `<database>` block titled `Morning Queue` exists on the dated page body. |
    | `db_row_count_matches` | The database's row count equals `items_written` (the count of items that survived Step 5.5 gating). |
    | `row_detail_pages_created` | A row-detail sub-page exists for every DB row (count equals `items_written`). |
-   | `no_markdown_row_dump` | The dated page body contains **no** queue-row content rendered as heading/paragraph blocks. Heuristic: no body Heading block whose text matches `Row \d+ —`, and no body paragraph leading with `**Project:**` / `**Triggered by:**` / `**Recommended action:**`. The only headings allowed on the dated page body are the structural ones (Morning Queue, Slack handles reference, Pod/AM digest anchors added in Mode 2). |
+   | `no_markdown_row_dump` | The dated page body contains **no** queue-row content rendered as heading/paragraph blocks. Heuristic: no body Heading block whose text matches `Row \d+ —`, and no body paragraph leading with `**Project:**` / `**Triggered by:**` / `**Recommended action:**`. The only headings allowed on the dated page body are the structural ones (Morning Queue, Slack handles reference, Fixed-Cost Pulse toggle, Pod/AM digest anchors added in Mode 2). |
    | `single_db` | No duplicate `Morning Queue` database on the page (Idempotency rule). |
 
 3. **On any assertion FAIL:** the run status is `Failed` (not `OK`, not `Partial`). 
@@ -155,6 +186,38 @@ After all rows and row-detail pages are written, the writer **re-fetches the dat
    - If the retry still fails, abort per the Error-handling table (`Database creation fails` / `Queue rendered as page-body markdown` rows) — send the PM the failure email, and pass the failed assertions to `writers/run-log.md` so the Run Log row records `Status = Failed` with the specific assertion(s) that failed. **Never report `OK` with a failed structure assertion** — a falsely-green Run Log is what let the 04 June markdown-dump run pass silently.
 
 4. **On all assertions PASS:** proceed to the Slack-handles reference block and exit normally. The passing assertion set is still recorded in `notion_write_assertions` and surfaced in the Run Log (so a healthy run leaves positive evidence the DB was built, not just an absence of errors).
+
+## Flow — Mode 2 ledger touch (fixed-cost resolve/snooze notes)
+
+Fires when Mode 2's note-interpreter (`synthesis/note-interpreter.md` § fixed-cost
+resolved/snooze sections) emits an `fc_ledger_update` action_plan against a Flag row
+carrying `fc_row_type: follow_up_reminder`. This is Mode 2's ONLY write to the Fixed-Cost
+Registry.
+
+1. Locate the Fixed-Cost Registry sub-page under the Notion parent.
+2. Find the Client-Ask Ledger row matching the action_plan's `ask_key`
+   (`#<project_number>|<Asked on>|<first 40 chars>`). The note-interpreter reads this
+   `ask_key` from the triggering row's detail page — the `ask_key: <value>` line inside its
+   bottom Reference Context toggle (`schemas/row-detail-page.md` § Bottom toggle), written
+   there at Mode 1 render time (§ Step 6.2 above). **Fallback** — if that toggle is missing
+   the line (older row, render drift): recompute `ask_key` by matching the row's `Project`
+   against the ledger's `Project` column and the row's ask text against the ledger's `Ask`
+   column (topic-match, same judgment as FC-1's resolution scan). If more than one open
+   ledger row plausibly matches, do NOT guess — set `confidence: low` and flag Uncertain
+   rather than touching the wrong ask.
+3. Apply the action_plan:
+   - **Resolve** (`status: Resolved-manual`) — set `Status` → `Resolved-manual`, `Resolved by`
+     → the action_plan's `resolved_by` (the PM note text), `Resolved on` → the action_plan's
+     `resolved_on` (today, YYYY-MM-DD).
+   - **Snooze** (`snooze_until_shift`) — bump the ask's `fc_state` `last_reminder` forward by
+     the requested period and mirror the new value into the ledger row's `Last reminder`
+     column. Do not touch `Status` or `Resolved on`.
+4. Write the queue row's `Outcome`: `Done — ask closed by PM` (resolve) or `Done — snoozed`
+   (snooze). The row `Status` flips to `Done` per the normal Step 7 rule in
+   `modes/mode-2-execution.md`; the row's `Recommended Action` stays `Flag` (no verb change).
+5. **Write failure** (ledger row not found, Notion API error): log an Incident, and the queue
+   row's Outcome notes the failure (`FAILED — couldn't update Client-Ask Ledger row for
+   <ask_key>. [error]`). The run continues — one ledger-touch failure does not abort Mode 2.
 
 ## Flow — updating rows after Mode 2
 
@@ -197,6 +260,45 @@ The block uses a Divider + Heading-2 anchor (`Slack handles for today (reference
 This block is purely a reference — the writer never reads back from it. The executor reads from it as a fallback when `slack_search_users` returns no match (preferring the pre-resolved handle to a runtime search).
 
 If a row carries zero potential Slack send targets (priority-lane row where the delegate is not in the matrix AND has no canonical email match, plus the AM has no handle), the block omits that row entirely. If every row falls into that case, skip the block — log `slack_handles_block_empty` to the Run Log.
+
+## Flow — refreshing the Fixed-Cost Registry (end of Mode 1)
+
+After the dated page is written (registry data already in hand from the collector +
+Job 4c):
+
+1. Update the header callout: count, `Last refresh`, `Discovery` mode. Bump
+   `Last successful discovery` ONLY when the collector's returned `discovery_succeeded`
+   flag (`collectors/orbit.md` § Fixed-cost extension) is `true` — a guard pass or a
+   completed Appendix-A sweep. **Never bump it on `discovery_succeeded: false`** — that
+   covers both the guard-trip fallback that merely reused the `registry_snapshot` and a
+   fully-skipped lane; both report `discovery_mode: fallback-sweep` (or absent) but neither
+   is a real discovery, so keying the bump on `discovery_mode` alone would let a bare
+   snapshot reuse falsely renew the ≤7-day freshness check every run. `Last refresh` bumps
+   on every run regardless.
+2. **Activity source / Clean audits (spec §11.3).** Render the header line `Activity
+   source: <value> · Clean audits: <n>` from `fc_output.fc_state_patch`: apply
+   `activity_source_next` / `clean_audits_next` when present, otherwise carry the current
+   values forward. When the applied patch CHANGES `Activity source` (shadow → mail-primary
+   cutover, or mail-primary → shadow revert), append a flip audit string to the audit
+   strings returned to the calling mode (same pattern as the suppressed-reminder /
+   dropped-ping audit strings — this writer NEVER touches the Run Log database;
+   `writers/run-log.md` is its only writer). The run-log writer renders it as a
+   decision-trace line at Mode 1 step 4e, format `[subject: Fixed-Cost Registry] →
+   [action: "activity-source flip"] → [reason: <shadow → mail-primary | mail-primary →
+   shadow>, <clean_audits reached 2 | mail_coverage_gap on re-audit>]`.
+   A pre-v4 page missing the line entirely → write it as `Activity source: shadow · Clean
+   audits: 0` this refresh (schema default).
+3. Reconcile the Tracked Projects table per schemas/fixed-cost-registry.md rules
+   (`filter` rows synced to today's discovery set; `manual` rows never auto-removed —
+   annotate ` — verify: closed?` when appropriate). For any Tracked Projects row
+   appearing for the first time this run, set `Added on = today` and fill `Client`
+   from `client_name` + `sub_client_name`.
+4. Apply the `fc_output.ledger_mutations` + `fc_output.fc_state_patch` returned by
+   matcher Job 4c (held in memory since synthesis): append FC-2 asks; set FC-1/FC-3
+   resolutions (`Status`, `Resolved by`, `Resolved on`); mirror `Last reminder` dates.
+5. Rewrite the `fc_state` block (asks/pings timestamps) inside its toggle.
+6. Any write fails after retries → Incident, continue (registry is a mirror; next run
+   heals it).
 
 ## Flow — Mode 2 PM self-summary callout (end of Mode 2)
 
@@ -427,9 +529,9 @@ See `modes/monthly-archival.md` for the orchestration. Because every dated page 
 4. Verify Month-toggle ordering inside each Year-toggle: newest Month on top. Reorder if drifted.
 5. Verify dated `child_page` block ordering inside each Month-toggle: newest date on top. Reorder if drifted.
 6. Ensure `Preferences` `child_page` block is still the last block on the parent body.
-7. Ensure `Run Log` and `Incidents` `child_page` blocks sit immediately above `Preferences`, in that order, after all Year-toggle blocks.
+7. Ensure `Run Log`, `Incidents`, and `Fixed-Cost Registry` `child_page` blocks sit immediately above `Preferences`, in that order, after all Year-toggle blocks.
 
-`notion-move-pages` is used only when sub-pages (Day, Run Log, Incidents, Preferences) need to be re-rooted across parent pages — which should never happen in normal operation. Toggle-block reordering uses `notion-update-page` instead.
+`notion-move-pages` is used only when sub-pages (Day, Run Log, Incidents, Fixed-Cost Registry, Preferences) need to be re-rooted across parent pages — which should never happen in normal operation. Toggle-block reordering uses `notion-update-page` instead.
 
 ## Flow — Preferences page updates
 
@@ -454,6 +556,7 @@ Use `notion-update-page` with `command: update_content` and targeted find-and-re
 - Don't auto-migrate legacy Year/Month sub-pages into toggle blocks — log drift, leave alone.
 - Don't append a second Pod Daily Task block on the same dated page. Replace the existing toggle's children instead.
 - Don't append a second AM Daily Ping block on the same dated page. Find the anchor and replace the body blocks below it.
+- Don't append a second Fixed-Cost Pulse toggle on the same dated page. Find by its `Fixed-Cost Pulse —` title prefix and replace it in place.
 
 ## Error handling
 
@@ -464,7 +567,7 @@ Use `notion-update-page` with `command: update_content` and targeted find-and-re
 | Queue rendered as page-body markdown (Step 6.5 `no_markdown_row_dump` or `db_created` FAILS) | This is a writer bug, not a Notion error. Retry the database build once: create the DB, migrate row content into DB rows + detail pages, delete the offending page-body heading/paragraph blocks, re-run the Step 6.5 gate. If still failing, abort with sent email to PM: `Morning queue was written as plain text instead of a database — aborted to avoid a non-executable queue. [assertion]`. Record `Status = Failed` + the failed assertion keys in the Run Log. Never report `OK`. |
 | Row creation fails for a single item | Log in AI Notes on the summary block, continue with remaining rows |
 | Block reorder fails during archival | Log and continue. Order drift can be corrected on the next fire. |
-| `notion-move-pages` fails during archival sub-page reorder (Run Log / Incidents / Preferences) | Log and continue. |
+| `notion-move-pages` fails during archival sub-page reorder (Run Log / Incidents / Fixed-Cost Registry / Preferences) | Log and continue. |
 | Year or Month toggle creation fails | Retry once. If still fails, abort Mode 1 with sent email to PM: `Couldn't create the Year/Month toggle block. [error]` — do NOT fall back to creating the dated page flat at the parent body level. |
 | Pod Daily Task block append fails | Log to run-log. Continue. Append `Pod Daily Task block failed to render — see run-log.` to the PM self-summary. Do not abort Mode 2. |
 | AM Daily Ping block append fails | Log to run-log. Continue. Append `AM Ping Drafts block failed to render — see run-log.` to the PM self-summary. Do not abort Mode 2. |

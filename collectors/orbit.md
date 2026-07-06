@@ -23,14 +23,22 @@ The sub-agent does, in its own context:
 - `get_user_workload(PM)` (step 1 of the mandatory sequence),
 - the per-project `get_activity_log` loop (step 2),
 - `get_primary_account_manager_users` (step 3) + the priority-pass local filter (Pass A),
+- the fixed-cost discovery call + filter guard + merged union activity loop (§ Fixed-cost extension) — same sub-agent, same pass,
 - HTML→plain-text cleaning of every signal's content/excerpt, the comment-tree flatten + newest-first sort, and `latest_signal` computation,
 - relationship-map assembly.
 
 The sub-agent returns to the main routine **only the distilled, structured outputs** (no raw dumps):
-- `priority_signals[]` and `orbit_signals[]` (per § Output shape — plain text, not HTML),
+- `priority_signals[]` and `orbit_signals[]` (per § Output shape — plain text, not HTML; signals sourced from the fixed-cost lane carry `origin: fixed_cost_registry`),
+- `fixed_cost_projects[]` (the discovery output, § Fixed-cost extension) and the `discovery_mode` flag (`filtered` | `fallback-sweep`), plus the boolean `discovery_succeeded` (§ Fixed-cost discovery step 2c/2d — true only on a guard pass or a completed Appendix-A sweep; false when the fallback merely reused the `registry_snapshot`'s last-known tracked set, or when the lane skipped entirely),
+- `fixed_cost_activity_loop_ran` (boolean) — true when the unfiltered fixed-cost
+  `get_activity_log` loop executed this run (shadow mode, monthly re-audit, or
+  Gmail-failure fallback); the FC-0 audit and the Mode 1 narrative read this instead of
+  re-deriving the calendar/mode logic.
+- per-project `activity_summary[]` for fixed-cost projects (counts only, for the Pulse writer — § Fixed-cost extension),
+- per-project `open_task_roster[]` for fixed-cost projects (open-task snapshot for FC-4 staleness judgment — § Fixed-cost extension § Fixed-cost signal handling),
 - the `relationship_map` (projects + tasks + `latest_signal`; **no** raw bodies or comment trees),
 - the `workload_summary` aggregates and resolved `AM_user_ids`,
-- explicit **assertion flags** — `workload_fetched: true|false` and `activity_log_projects_queried: <N of by_project count>` — so Mode 1 sub-step 1f can verify collection completeness from the flags rather than by inspecting a tool trace.
+- explicit **assertion flags** — `workload_fetched: true|false`, `activity_log_projects_queried: <N of by_project count>`, and `discovery_mode` (present whenever discovery ran or consciously fell back; absent only if the discovery call itself failed after retries, per § Fixed-cost extension Failure posture) — so Mode 1 sub-step 1f can verify collection completeness from the flags rather than by inspecting a tool trace.
 
 **What stays in the MAIN context (NOT in this sub-agent):** the **per-row deep-read** (`get_task_details`, § Per-row deep-read) is fired by the matcher during Job 7, in the main routine context — so the 6-section body composition reads each surviving task's full body + comment thread end-to-end with no fidelity loss. The sub-agent supplies the `task_id`s (via the relationship map and signals); the matcher does the deep reads where the judgment happens. `get_user_workload(candidate_user_id)` availability scoring (pod-inference, lazy) likewise runs in the main context.
 
@@ -41,6 +49,127 @@ Orbit has a direct user-scoped workload API: `get_user_workload(user_id, is_comp
 **The universe of interest = `get_user_workload(PM_user_id, is_completed=incomplete, per_page=500)`.** Every primary collection signal flows from this set. Change history comes from `get_activity_log`, which is **project-scoped** (a `project_id` is required) — so it is called once per project in the workload's `workload_summary.by_project[]` set (date-bounded to `last_run_timestamp`), not as a single global call. See § MANDATORY tool call sequence step 2.
 
 Tasks the PM follows but is NOT assigned to are intentionally out of scope here — if a follower-only task needs PM input, that ask reliably surfaces through Gmail (the AM emails the PM) and is captured by `collectors/gmail.md`. The morning queue is about the PM's own todos plus the items the PM hasn't yet acknowledged; Gmail is the safety net for everything outside the PM's direct task list (per Mode 1 Step 2 § Role of Gmail and matcher Job 5 § Unactioned client signal → Create parent task).
+
+## Fixed-cost extension — ONE project-scoped lane inside the same sweep
+
+The user-scoped universe above stays authoritative for everything except **Active + Fixed
+Cost projects managed by this PM** (`development_owner == PM`). For those projects only, the
+collector widens from "tasks assigned to the PM" to "the whole project" — activity by ANY
+actor. Everything below runs inside this same collection sub-agent, in the same single pass.
+
+**Registry access is an input, not a Notion read.** This collector's allowlist is Orbit-only
+(see the banner at the top of this file) — it never calls Notion. The Fixed-Cost Registry page
+is read by the **main routine, BEFORE dispatching this sub-agent**, and passed in as a
+`registry_snapshot` invocation input: `{tracked_projects[] (incl. manual pins),
+last_successful_discovery, tracked_count, client_ask_ledger[], activity_source (shadow |
+mail-primary; missing → shadow), clean_audits (int; missing → 0)}` — plus the registry's
+`fc_state` block, carried on the same object. This collector ignores `client_ask_ledger[]`
+and `fc_state` entirely (they ride through for matcher Job 4c, which the main routine hands
+the same snapshot). Every reference below to "the registry" — the
+guard's last-known tracked count, the fallback branch's tracked set, the manual pin union —
+resolves against that `registry_snapshot` input, not a live Notion fetch. `activity_source`
+gates the merged activity loop's fixed-cost half — see § Merged activity loop §
+Activity-source gate. `clean_audits` is carried through unused by this collector — it is
+input for the state tracker's FC-0 cutover math and the writer's header render, not for this
+gate.
+
+### Fixed-cost discovery (runs before the activity loop)
+
+1. Call `list_projects(type_name="Fixed Cost", status_name="Active",
+   development_owner_id=<PM_user_id>)`; page until exhausted (expected 1–2 pages / 20–30
+   projects). The `development_owner_id` filter is LIVE (validated 2026-07-06 on UAT:
+   `development_owner_id=587` returned exactly that PM's 9 active fixed-cost projects).
+2. **Filter guard — MANDATORY, never trust the response shape.** A backend that loses or
+   lacks the param silently ignores it and returns the org-wide list with no error — the
+   guard is the regression tripwire:
+   a. *Plausibility:* `total` > 40 AND `total` ≥ 2× the registry's last-known tracked count →
+      suspect (a registry with no last-known count — first run or empty — makes `total` > 40
+      alone sufficient).
+   b. *Spot check:* pick ONE returned project (rotate daily by date-mod-N), call
+      `get_project_details`, assert `development_owner` == this PM. Mismatch → guard trips.
+   c. Guard trips → discard the result. If the `registry_snapshot`'s
+      `last_successful_discovery` ≤ 7 days old AND its `tracked_projects[]` is non-empty →
+      reuse that snapshot's tracked set as today's set, `discovery_mode: fallback-sweep`,
+      **`discovery_succeeded: false`** (this branch is a mere snapshot reuse — no discovery
+      actually happened this run, so it must NEVER bump `Last successful discovery`).
+      Otherwise (stale, or empty because this is a first run / freshly-created registry) →
+      run the Appendix-A sweep (spec): unfiltered `list_projects(type_name="Fixed Cost",
+      status_name="Active")` all pages + `get_project_details` per project, keep
+      `development_owner == PM`, `discovery_mode: fallback-sweep`, **`discovery_succeeded:
+      true`** (a real, completed sweep — this DOES earn the `Last successful discovery`
+      bump). Rationale: `last_refresh` is bumped every run regardless of
+      outcome, so it can't gauge discovery health — only `discovery_succeeded` (guard pass or
+      completed sweep) reflects an actual successful discovery; and an empty just-created
+      registry has nothing to "reuse", so it must sweep. Either way: write an Incident
+      (`fixed-cost discovery filter not applied`).
+   d. Guard passes → `discovery_mode: filtered`, `discovery_succeeded: true`.
+3. Union in the registry's `manual` pin rows (`schemas/fixed-cost-registry.md`). Output: `fixed_cost_projects[]`
+   with `{project_id, project_number, title, client_name, sub_client_name, due_date,
+   added_by}` + `discovery_mode`. `sub_client_name` comes from the `list_projects` payload
+   (null allowed). `added_by`/first-seen bookkeeping (the registry's `Added on` column) is the
+   WRITER's job at registry refresh — this collector does not track first-seen; it only
+   stamps `added_by: filter | manual` per project based on which set it came from.
+
+### Merged activity loop — one loop, no second sweep
+
+Loop set = `workload_summary.by_project[] ∪ fixed_cost_projects[]`, deduped by `project_id`:
+
+- **Activity-source gate (spec §11.3).** The unfiltered fixed-cost `get_activity_log`
+  calls below run ONLY when `registry_snapshot.activity_source == "shadow"`, OR when it is
+  `"mail-primary"` AND today (IST) is the first Friday of the month — the Friday whose
+  day-of-month ≤ 7 (IST) — (monthly re-audit), OR
+  when the main routine dispatched this sub-agent with `gmail_collector_failed: true`
+  (one-run fallback — Gmail down means no mail feed this run; never run blind). In
+  mail-primary mode outside those cases, SKIP the unfiltered fixed-cost `get_activity_log`
+  calls entirely — the mail-derived signals (`origin: fixed_cost_mail`, from the Gmail
+  collector) are the fixed-cost event feed. The `get_project_task_list` roster call per
+  tracked project and the workload-project `get_activity_log` calls (`user_id=PM`) run
+  UNCHANGED in every mode. Overlap rule in mail-primary mode: a fixed-cost project also in
+  the workload gets its normal `user_id=PM` call only (the all-actor view arrives by mail).
+- **Fixed-cost projects** (in the union, whether or not also in workload):
+  `get_activity_log(project_id, startdate=<lookback>, timezone="Asia/Kolkata", per_page=500,
+  page on has_more)` — **NO `user_id` param** → all actors.
+- **Workload-only projects:** the existing call, unchanged (`user_id=PM`).
+- Overlap rule: a project in both sets gets ONE unfiltered call, never two. The unfiltered
+  result is a strict superset of the PM-filtered result — zero signal loss, one call saved.
+- Monday lookback override applies to both identically.
+
+### Fixed-cost signal handling
+
+- Every signal originating from a fixed-cost project's unfiltered log carries
+  `origin: fixed_cost_registry` in its output shape.
+- `latest_signal` per task: same flatten-newest-first rule as everywhere else.
+- Additionally emit per-project `activity_summary` counts for the Pulse writer:
+  `{project_number, title, due_date, tasks_completed, comments, status_changes, new_tasks,
+  hours_logged_entries}` — zeros allowed (Pulse renders "no movement" from zeros). Counts
+  only; no bodies (the Pulse never deep-reads).
+- **Open-task roster (feeds FC-4 staleness — `synthesis/fixed-cost-state.md` § FC-4).** The
+  merged activity loop above is lookback-bounded (~12h/72h) and therefore cannot see a task
+  that has had zero events in that window — exactly the tasks FC-4 needs to find. To close
+  that gap, for each tracked fixed-cost project the collection sub-agent ALSO calls
+  `get_project_task_list(project_id, is_completed="incomplete")` — one call per project,
+  issued in parallel with that project's `get_activity_log` call in the merged activity loop
+  (same loop iteration, zero added serial latency). `get_project_task_list` returns each
+  task's assignee; the sub-agent computes `assignee_is_pm := (assignee.id == PM_user_id)`.
+  The roster is built directly from that response: `{task_id, title, assignee,
+  assignee_is_pm, due_date, last_activity_at}` — `last_activity_at`
+  is the task list's updated/last-activity timestamp when present; when the payload lacks one, mark
+  `last_activity_at: null` (FC-4 treats `null` as "verify via light deep-read" rather than
+  assuming staleness or freshness).
+
+### Failure posture (this lane only)
+
+Discovery call fails outright after retries (the call itself errors — not a guard trip) →
+reuse the `registry_snapshot`'s last-known tracked set (manual pins included) for today's
+loop, `discovery_mode: fallback-sweep`, **`discovery_succeeded: false`** (this is a reuse,
+same as the guard-trip reuse branch above — never bumps `Last successful discovery`),
+Incident. Only if the snapshot is empty/unavailable does the lane skip entirely for this run
+(workload-only, today's prior behavior), **`discovery_succeeded: false`**, Incident.
+A single project's activity call fails after retries → skip that project, note in run log,
+continue. A project's `get_project_task_list` roster call fails after retries → that project
+skips FC-4 this run (no `open_task_roster[]` entry for it; noted in run log as
+`fixed_cost_roster_unavailable: <project_id>`); its follow-up reminders (FC-1..FC-3, which
+don't depend on the roster) are unaffected. This lane never aborts the run.
 
 ## Priority Pass (Mode 1 sub-step 1d — local filter, no MCP calls of its own)
 
@@ -145,7 +274,7 @@ This block overrides any inferred "fast path" the runtime might take. Mode 1's n
 6. **`get_asset_attachment_summary_with_download_url`** — call ONLY when a task/project `task_attachments[].summary` is empty or insufficient. The `summary` field is pre-extracted in the `get_task_details` / `get_project_details` payloads, so most attachments need no separate call.
 7. **`list_clients` / `list_sub_clients` / `list_users`** — relationship-map enrichment for client / sub-client / actor identification on the workload's per-task project info. `list_users` is also used by `references/pod-matrix.md` for matrix-member name→id resolution (cached once per run).
 
-**`list_projects` and `get_project_task_list` are no longer in the mandatory sequence.** The PM's task universe comes from `get_user_workload(PM)`, not from project enumeration. These tools remain available for narrow secondary use cases (e.g., the PM's owned-project list, if needed for non-collection purposes), but are NOT called during the normal collection pass.
+**`list_projects` and `get_project_task_list` are no longer in the mandatory sequence for user-scoped universe discovery.** The PM's task universe comes from `get_user_workload(PM)`, not from project enumeration. Outside the fixed-cost lane, `get_project_task_list` remains available only for narrow secondary use cases (e.g., dedup checks in the matcher's lazy off-workload path) and is NOT called during the normal collection pass to build the PM-workload universe. `list_projects` gains one legitimate, still-mandatory use in this same sub-agent's fixed-cost lane (§ Fixed-cost extension § Fixed-cost discovery) — that call is project-scoped by design (`development_owner == PM`, not the PM's assignee universe) and runs separately from, not instead of, the `get_user_workload(PM)` step below. `get_project_task_list` likewise gains one legitimate, mandatory use in the same fixed-cost lane (§ Fixed-cost extension § Fixed-cost signal handling): one call per tracked fixed-cost project, building `open_task_roster[]` for FC-4 staleness — project-scoped, not a universe-discovery iteration.
 
 `get_user_workload` now has TWO uses in this skill, with different `user_id` targets:
 
@@ -153,6 +282,8 @@ This block overrides any inferred "fast path" the runtime might take. Mode 1's n
 - **Candidate-availability (pod-inference, lazy)** — `get_user_workload(candidate_user_id, ...)` is called by `synthesis/pod-inference.md` ONLY on the matcher Job 6 no-history fallback path, to score availability of a small candidate subset. Per SKILL.md non-negotiable rule #6.
 
 The Mode 1 Step 1f assertion checks BOTH that `get_user_workload(PM)` was called (step 1 above) AND that `get_activity_log` was called at least once per project in `workload_summary.by_project[]` (step 2) — a tool trace missing the workload call, or showing zero `get_activity_log` calls when the workload had projects, is a hard abort. A trace that shows only `get_user_workload(PM)` and no `get_activity_log` is a SPEC VIOLATION — change detection requires both calls. (Under the collection-sub-agent model below, the sub-agent returns these as explicit flags; the main routine's 1f reads the flags rather than re-inspecting a tool trace.)
+
+The same 1f assertion additionally checks that the fixed-cost discovery lane **ran or consciously fell back** (§ Fixed-cost extension) — it reads the sub-agent's returned `discovery_mode` flag, which is always one of `filtered`, `fallback-sweep`, or absent. `filtered`/`fallback-sweep` both count as "ran": the discovery call succeeded and either passed or tripped the filter guard (fallback is a conscious, logged degradation, not a failure). `discovery_mode` absent is legitimate ONLY when § Fixed-cost extension's Failure posture fired (the discovery call itself failed after retries) — in that case the sub-agent must also return the Incident it logged, and 1f treats it as a soft-degrade (workload-only), not a hard abort. `discovery_mode` absent with no corresponding Incident is a hard abort — it means discovery was silently skipped.
 
 If `get_user_workload(PM)` returns an MCP error, apply the retry policy from `connector-failure-notify.md` (4 attempts, 2s/5s/15s backoff). After 4 failures, log `orbit_user_workload_unavailable` in the Run Log and abort the Orbit collector — no universe means no Orbit signals this run. If `get_activity_log` returns an MCP error, apply the same retry policy. After 4 failures, log `orbit_activity_log_unavailable` and continue with workload-only data — the PM will see "no change detection this morning, only static workload" in the page summary, and the Mode 1 Step 1f assertion will surface the gap.
 
@@ -265,6 +396,7 @@ Each signal is a structured record:
   "source": "orbit",
   "signal_type": "activity_log_entry" | "overdue_task" | "new_task" | "status_change" | "new_comment" | "new_attachment" | "pm_task_due_today",
   "bypass_pm_action_filter": <bool — true only on pm_task_due_today signals (and priority-pass signals); absent/false otherwise>,
+  "origin": <"fixed_cost_registry" — present only on signals sourced from a fixed-cost project's unfiltered activity log (§ Fixed-cost extension); absent on every ordinary user-scoped signal>,
   "project_id": <int>,
   "project_title": <string>,
   "project_url": <string>,
@@ -370,13 +502,16 @@ Use the following Orbit MCP tools (the `mcp__...orbit.` prefix matches whichever
   - **PM-workload (THIS collector, mandatory):** `get_user_workload(PM_user_id, is_completed=incomplete, per_page=500)`. Called once per Mode 1 run in step 1 of the mandatory sequence. Returns every open task assigned to the PM plus the precomputed `workload_summary` (including the deduped `by_project[]` set).
   - **Candidate-availability (`synthesis/pod-inference.md`, lazy):** `get_user_workload(candidate_user_id, ...)`. Invoked ONLY on the matcher Job 6 no-history fallback path to score availability of a small candidate subset. Per SKILL.md non-negotiable rule #6.
 - `mcp__...orbit.get_activity_log` — for changes since last run. **`project_id` is required** — loop once per project in `workload_summary.by_project[]` with `user_id=PM_user_id`, `startdate=<last_run YYYY-MM-DD>`, `timezone="Asia/Kolkata"`, `per_page=500`; page on `has_more`. Map entries back to workload `task_id`s by the task name in the entry HTML.
+- **`mcp__...orbit.get_activity_log` — fixed-cost unfiltered variant, conditional on `activity_source` (§ Activity-source gate):** same call shape, one per tracked fixed-cost project, but with **no `user_id` param** (all actors). Fires in `shadow` mode, on the mail-primary monthly first-Friday re-audit, or on a one-run Gmail-failure fallback; skipped entirely otherwise in `mail-primary` mode.
 - `mcp__...orbit.get_primary_account_manager_users` — enumerate the org's AMs for priority-pass `AM_user_ids` resolution (matched against the PM's Preferences AM). Replaces `list_users` email-matching for AM identity.
 - `mcp__...orbit.get_task_details` — the per-row deep-read super-call: full `description` + threaded `comments[]` + `subtasks[]` + `followers[]` + `task_attachments[]`(with `summary`) in ONE call. Fired per surviving row in Job 7.
 - `mcp__...orbit.list_task_comments` — **fallback only**, when `get_task_details.comments` looks paginated/capped, or for the `comment_filter`/`group_by_type` split.
 - `mcp__...orbit.get_asset_attachment_summary_with_download_url` — only when a bundled `task_attachments[].summary` is empty/insufficient (note: unreliable for non-txt — default to download-and-read per `writers/source-citation.md`).
 - `mcp__...orbit.list_clients`, `mcp__...orbit.list_sub_clients` — for client/sub-client enrichment in the relationship map.
 - `mcp__...orbit.list_users` — for matrix-name → user_id resolution. Called once per Mode 1 run by `references/pod-matrix.md`; the user list is cached for the duration of the run. (AM identity now resolves via `get_primary_account_manager_users` above.)
-- **`mcp__...orbit.get_project_details`** — **mandatory collection call**, one per project in `workload_summary.by_project[]`, co-issued in parallel with `get_activity_log` during the step-2 per-project loop. Fetches `project_number` + `followers[]` + project metadata for the relationship map. Runs inside the sub-agent at collection time — NOT lazy or post-filter (see § `project_number` enrichment).
+- **`mcp__...orbit.get_project_details`** — **mandatory collection call**, one per project in `workload_summary.by_project[]`, co-issued in parallel with `get_activity_log` during the step-2 per-project loop. Fetches `project_number` + `followers[]` + project metadata for the relationship map. Runs inside the sub-agent at collection time — NOT lazy or post-filter (see § `project_number` enrichment). **Second, distinct use:** the fixed-cost filter-guard spot check (§ Fixed-cost extension) — one call per run, on a single rotating project from the discovery result, asserting `development_owner` matches this PM before the discovery result is trusted.
+- **`mcp__...orbit.list_projects`** — **mandatory fixed-cost discovery call** (§ Fixed-cost extension): `list_projects(type_name="Fixed Cost", status_name="Active", development_owner_id=<PM_user_id>)`, paged (1–2 calls/pages, expected 20–30 projects); the `development_owner_id` filter is live (validated 2026-07-06 UAT). On a filter-guard trip that falls to the Appendix-A sweep, called again unfiltered (`type_name="Fixed Cost", status_name="Active"`, all pages) as the fallback path. This is a separate, narrow use from the retired per-project-iteration universe discovery (§ MANDATORY tool call sequence, above) — it never enumerates projects the PM isn't `development_owner` on.
+- **`mcp__...orbit.get_project_task_list`** — **mandatory fixed-cost roster call** (§ Fixed-cost extension § Fixed-cost signal handling): `get_project_task_list(project_id, is_completed="incomplete")`, one call per tracked fixed-cost project, issued in parallel with that project's `get_activity_log` call in the merged activity loop (20–30 small calls). Builds `open_task_roster[]` — the open-task snapshot FC-4 needs to detect staleness outside the lookback-bounded activity log. This is a separate, narrow use from the lazy off-workload dedup use below — it runs unconditionally, in-sub-agent, for every tracked fixed-cost project, not on-demand for a single search-resolved project.
 
 **Not part of the standing relationship-map build — but called LAZILY by the matcher for off-workload project resolution + dedup** (`synthesis/matcher.md` § "Unactioned client signal → Create parent task"). These fire only when a Possible-Orbit-miss Gmail signal resolves to no project in the PM's workload map — a low-volume escalation, not part of normal collection:
 - `mcp__...orbit.list_clients(search_value=…)` / `mcp__...orbit.get_client_details(company_name=… | client_id=…)` — resolve the sender's CLIENT (id, AM, `contact_people` emails, `website_link` domain) when the workload map has no candidate. Note: `get_client_details` returns project *counts*, not the project list.
@@ -388,7 +523,7 @@ All four are read-only and auto-`allow`; `create_task` (the only write in this f
 
 ## Performance
 
-Single primary API call (`get_user_workload(PM)`) returns the entire universe — typically 30–80 open tasks for a working PM, capped at `per_page=500`. Per-project fan-out in the step-2 loop: **one `get_activity_log` + one `get_project_details` per project** (typically 5–15 projects; both calls parallelizable within the same loop — zero extra serial latency for `get_project_details`). Synthesis phase: **one `get_task_details` pre-batch in Job 5.5** for all `Create subtask` survivors (typically 10–30 rows), with Job 7 reusing those cached results — no double-fetch. `list_task_comments`, `list_task_comments` fallback, and `get_asset_attachment_summary_with_download_url` fire only as fallbacks (truncated comment tree / empty bundled summary). Compared to the prior project-iteration model (which fired N task-list calls for N=30-50 projects PLUS a two-call deep-read per row), the collection step is bounded by project count, not task count, and the synthesis deep-read is halved.
+Single primary API call (`get_user_workload(PM)`) returns the entire universe — typically 30–80 open tasks for a working PM, capped at `per_page=500`. Per-project fan-out in the step-2 loop: **one `get_activity_log` + one `get_project_details` per project** (typically 5–15 projects; both calls parallelizable within the same loop — zero extra serial latency for `get_project_details`). Fixed-cost lane adds **one `get_project_task_list` per tracked fixed-cost project** (typically 20–30 projects, parallel with that project's `get_activity_log` call — zero extra serial latency). Synthesis phase: **one `get_task_details` pre-batch in Job 5.5** for all `Create subtask` survivors (typically 10–30 rows), with Job 7 reusing those cached results — no double-fetch. `list_task_comments`, `list_task_comments` fallback, and `get_asset_attachment_summary_with_download_url` fire only as fallbacks (truncated comment tree / empty bundled summary). Compared to the prior project-iteration model (which fired N task-list calls for N=30-50 projects PLUS a two-call deep-read per row), the collection step is bounded by project count, not task count, and the synthesis deep-read is halved. `mail-primary` mode drops the 20–30 unfiltered fixed-cost `get_activity_log` calls to 0 (spec §11.6); the `get_project_task_list` roster call per tracked project stays unconditional and its cost is unchanged.
 
 Wall-clock target for Orbit collection alone: under 30 seconds on a typical morning. The full Mode 1 wall-clock target (10–15 minutes) is dominated by Notion writes and synthesis, not Orbit calls.
 
@@ -406,7 +541,7 @@ Wall-clock target for Orbit collection alone: under 30 seconds on a typical morn
 - Does not synthesize or group signals. That's the matcher's job.
 - Does not dedup against other sources. Each source collector is independent.
 - Does not filter by urgency or importance. Every relevant signal is returned.
-- Does not iterate per project **for universe discovery**. The universe is user-centric (`get_user_workload(PM)`) — `list_projects` and `get_project_task_list` are NOT called during normal collection; the old per-project task-list iteration (N API calls of mostly-irrelevant tasks) is fully retired. **Note the one legitimate per-project loop:** `get_activity_log` requires a `project_id`, so change detection loops it once per project in the workload's `by_project[]` set — that loop reads only the PM's own activity (`user_id=PM` filter, date-bounded) and never enumerates projects the PM has no task in.
+- Does not iterate per project **for user-scoped universe discovery**. The PM-workload universe is user-centric (`get_user_workload(PM)`) — `list_projects` and `get_project_task_list` are NOT called to build that universe; the old per-project task-list iteration (N API calls of mostly-irrelevant tasks) is fully retired. **Note the one legitimate per-project loop:** `get_activity_log` requires a `project_id`, so change detection loops it once per project in the workload's `by_project[]` set — that loop reads only the PM's own activity (`user_id=PM` filter, date-bounded) and never enumerates projects the PM has no task in. **Note the one legitimate `list_projects` call:** the fixed-cost discovery lane (§ Fixed-cost extension) calls `list_projects(development_owner_id=PM)` — a project-scoped lookup, not a universe-discovery iteration, and it never enumerates projects outside this PM's fixed-cost ownership. **Note the one legitimate `get_project_task_list` loop:** the fixed-cost lane (§ Fixed-cost extension § Fixed-cost signal handling) calls `get_project_task_list(project_id, is_completed="incomplete")` once per tracked fixed-cost project to build `open_task_roster[]` — project-scoped, bounded to this PM's fixed-cost ownership, and orthogonal to the retired user-scoped universe-discovery iteration.
 - Does not detect follower-only tasks (tasks the PM follows but is not assigned to). If a follower-only task needs PM input, the ask reliably surfaces through Gmail and is captured by `collectors/gmail.md`; matcher Job 5 routes it via the standard or Possible-Orbit-miss paths.
 - Does not detect unassigned project orphans. Same rationale — if an unassigned task genuinely needs the PM, an AM will email about it.
 - Does not collect candidate-workload proactively. `get_user_workload(candidate_user_id)` (different `user_id` than the PM-workload call) is invoked lazily by `synthesis/pod-inference.md` on the matcher Job 6 no-history fallback path only, per `SKILL.md` non-negotiable rule #6. The PM-workload call IS made proactively every Mode 1 run — that is its intended use.
