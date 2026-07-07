@@ -15,7 +15,9 @@ All Notion write operations. Creates and reuses **Year and Month heading-toggle 
 - `mcp__...notion.notion-create-database` — create inline databases
 - `mcp__...notion.notion-update-page` — update page content or properties
 - `mcp__...notion.notion-update-data-source` — update database schema if needed
-- `mcp__...notion.notion-move-pages` — for monthly archival and structural drift correction
+- `mcp__...notion.notion-move-pages` — re-parents a page/database only. No position argument — cannot place a block at a specific spot. Used for monthly archival sub-page re-rooting, never for ordering.
+
+**No block-reorder primitive exists.** `notion-update-page` exposes `update_content` (search-and-replace via `content_updates: [{old_str, new_str}]`), `insert_content` (prepend/append at literal page start/end only), and `replace_content` (full rewrite) — nothing that reorders an existing block in place. Every "move to the top," "reorder," or "insert at position X" instruction below targets a position relative to other content (below the header callout, above earlier toggles, inside a specific toggle's children) — never the page's literal start/end — so `insert_content` doesn't apply; the mechanism is always: re-fetch the current markdown → locate the exact block's string → one `update_content` call whose `old_str`/`new_str` pair removes the block from its old spot and reinserts it at the new spot **in the same call**. Splitting removal and insertion across two calls (or a `new_str` that momentarily omits the child page/database) trips the `allow_deleting_content` safeguard, since Notion sees a referenced child page vanish from the content. Verified live 2026-07-07.
 
 ## Flow — writing today's page (Mode 1)
 
@@ -23,14 +25,14 @@ Called after the matcher has produced the ordered list of items.
 
 ### Step 1 — Confirm Preferences at bottom of parent
 
-Fetch the parent page block tree. Confirm the `Preferences` `child_page` block is the last block on the parent body. If not, move it to the end via `notion-update-page` block-reorder.
+Fetch the parent page block tree. Confirm the `Preferences` `child_page` block is the last block on the parent body. If not, move it to the end via the atomic `update_content` mechanism (see Tools used note above): one call whose `old_str`/`new_str` removes the `Preferences` block from its current spot and reinserts it after the last other block, in the same call.
 
 ### Step 2 — Resolve / create the Year toggle block
 
 - Compute current `YYYY` (4-digit, e.g., `2026`).
 - Fetch the parent's body block tree.
 - Look for a Heading-1 toggle block (`heading_1` with `is_toggleable: true`) on the parent body whose plain-text content is exactly `YYYY` (no prefix, no suffix).
-- If absent: insert one at the top of the parent body, immediately below the header callout, above any earlier Year toggles. Use `notion-update-page` to append the new block, then move it into position. Default state: expanded.
+- If absent: insert one immediately below the header callout, above any earlier Year toggles. Via the atomic `update_content` mechanism: one call whose `old_str` matches the header callout's markdown (plus whatever currently follows it) and whose `new_str` is the same text with the new toggle block inserted right after the callout. Default state: expanded.
 - If present: reuse — never create a duplicate. If multiple match, log to run-log, use the topmost, leave the duplicates alone for PM review.
 - **Legacy detection:** if a sub-page (`child_page` block) titled `YYYY` exists on the parent body instead of a toggle block, log to run-log as `Legacy Year sub-page detected: <year>`. Create the new toggle block in the correct position; the legacy sub-page is left untouched (no auto-migration).
 
@@ -39,7 +41,7 @@ Fetch the parent page block tree. Confirm the `Preferences` `child_page` block i
 - Compute current `Month` spelled out (e.g., `April`).
 - Fetch the Year toggle's children blocks.
 - Look for a Heading-2 toggle block (`heading_2` with `is_toggleable: true`) inside the Year toggle whose plain-text content is exactly `Month` (spelled out, no year suffix).
-- If absent: insert one at the TOP of the Year toggle's children, above earlier Month toggles. Default state: expanded.
+- If absent: insert one at the TOP of the Year toggle's children, above earlier Month toggles. Same atomic `update_content` mechanism as Step 2 — `old_str` matches the Year toggle's opening + its current first child, `new_str` inserts the new Month toggle between them, in one call. Default state: expanded.
 - If present: reuse — same dup + legacy rule as Year.
 
 ### Step 4 — Create today's dated sub-page
@@ -47,7 +49,7 @@ Fetch the parent page block tree. Confirm the `Preferences` `child_page` block i
 - **Title:** today's date in "DD Month YYYY" format. Example: `25 April 2026`.
 - **Icon:** 📅
 - **Notion-tree parent:** the parent page (use `notion-create-pages` with `parent` = `DEFAULT_NOTION_PARENT_PAGE_ID`). The dated sub-page is a direct child of the parent in the Notion sidebar tree.
-- **Body-block placement on parent:** insert the resulting `child_page` block at the TOP of the Month toggle's children (above older dated `child_page` blocks from the same month). Use `notion-update-page` block-append + reorder.
+- **Body-block placement on parent:** insert the resulting `child_page` block at the TOP of the Month toggle's children (above older dated `child_page` blocks from the same month). `notion-create-pages` lands the new page at the bottom of whatever it's appended to by default — use the atomic `update_content` mechanism to relocate its `child_page` block: one call whose `old_str` matches the Month toggle's opening + current first child and whose `new_str` inserts the new `child_page` block between them.
 - **Idempotency:** before creating, scan the Month toggle's children for an existing `child_page` block with the same title. If one exists and the run is intentional (PM-fired re-run), append a numeric rerun suffix per the existing flow: `25 April 2026 (rerun 2)`, `(rerun 3)`, etc. Pick the lowest unused suffix.
 
 ### Step 5 — Write the page body
@@ -75,7 +77,7 @@ Content order:
    > There is **NO fallback** to inline markdown if the database flow feels longer, the `notion-create-pages` content path looks simpler, or the DB tool errors. If `notion-create-database` fails, retry once, then abort per the Error-handling table — do NOT route the rows into the page body to "save the run". A markdown queue is worse than no queue: it looks complete while being non-executable, and it silently breaks Mode 2.
    > **Mandatory tool sequence (every Mode 1 run, in this order):** (a) `notion-create-database` on the dated page → capture `morning_queue_db_id`; (b) per surviving item, a DB-row create against `morning_queue_db_id` (Step 6.1) → capture each `row_id`; (c) per item, `notion-create-pages` for the row-detail sub-page (Step 6.2). The long per-row content (Task Brief, Triggered-by, Sources, Recommended Action reasoning, AI Notes) lives ONLY on the row-detail sub-page — never on the dated page body. If `notion-create-database` did not fire this run, the queue was NOT written, regardless of what the dated page looks like. The Step 6.5 gate verifies this before the run is allowed to report `OK`.
 
-   - Create via `notion-create-database` with the parent as this dated page.
+   - Create via `notion-create-database` with `parent.page_id` = this dated page. **Unverified:** the tool schema exposes no `is_inline` / placement flag — nothing in its signature confirms this produces an inline database block versus a full-page one. Before relying on this in production, create a test database this way and `notion-fetch` the dated page to confirm it renders inline in the block tree rather than as a separate full-page object.
    - Schema per `schemas/morning-queue-database.md` — 10 columns, all visible in the default view, in order: Summary, AI Notes, Orbit Task Link, Project, Recommended Action, Recommended Assignee, Outcome, PM Notes, Source Systems, Status.
    - `Orbit Task Link` is Notion's native URL property — single clickable URL per row. For `Create subtask` / `Reopen subtask` / `Hand off parent task` rows it holds the parent task's Orbit URL; for `Flag` rows it holds the bound Orbit task URL, or `—` / empty when no Orbit task is bound (e.g., Gmail-only flag); for `Create parent task` rows it holds `—` (the parent doesn't exist yet). The sub-task URL that Mode 2 creates is written into `Outcome` only — never into `Orbit Task Link` (which keeps the parent reference stable through the row's lifetime).
    - `Project` format is `<Project Name> (#<project_number>)` — matcher supplies both name and Orbit user-visible project code from `get_project_details.project_number` (NEVER the internal `id` field, per SKILL.md non-negotiable #22). Maintenance / Ad-hoc style projects append a type suffix (`— Maintenance`).
@@ -525,13 +527,13 @@ See `modes/monthly-archival.md` for the orchestration. Because every dated page 
 
 1. Verify the previous-month Month-toggle exists inside its Year-toggle on the parent body, and that all dated `child_page` blocks for that month sit inside it.
 2. If any dated `child_page` from a prior month is found at the parent body level outside any Month toggle OR inside the wrong Month toggle OR inside a legacy Year sub-page, log it in the run-log entry but DO NOT auto-move (placement drift implies manual edits — surface for PM review).
-3. Verify Year-toggle ordering on the parent body: newest Year on top, descending. Reorder via `notion-update-page` block-reorder if drifted.
-4. Verify Month-toggle ordering inside each Year-toggle: newest Month on top. Reorder if drifted.
-5. Verify dated `child_page` block ordering inside each Month-toggle: newest date on top. Reorder if drifted.
+3. Verify Year-toggle ordering on the parent body: newest Year on top, descending. If drifted, reorder via the atomic `update_content` mechanism (Tools used note above) — one call per swap, `old_str`/`new_str` removing and reinserting the out-of-place toggle in the same call.
+4. Verify Month-toggle ordering inside each Year-toggle: newest Month on top. Same mechanism if drifted.
+5. Verify dated `child_page` block ordering inside each Month-toggle: newest date on top. Same mechanism if drifted.
 6. Ensure `Preferences` `child_page` block is still the last block on the parent body.
 7. Ensure `Run Log`, `Incidents`, and `Fixed-Cost Registry` `child_page` blocks sit immediately above `Preferences`, in that order, after all Year-toggle blocks.
 
-`notion-move-pages` is used only when sub-pages (Day, Run Log, Incidents, Fixed-Cost Registry, Preferences) need to be re-rooted across parent pages — which should never happen in normal operation. Toggle-block reordering uses `notion-update-page` instead.
+`notion-move-pages` is used only when sub-pages (Day, Run Log, Incidents, Fixed-Cost Registry, Preferences) need to be re-rooted across parent pages — which should never happen in normal operation. It only changes a page's parent; it cannot reorder. All toggle-block and child-page reordering above uses the atomic `notion-update-page` `update_content` mechanism instead.
 
 ## Flow — Preferences page updates
 
