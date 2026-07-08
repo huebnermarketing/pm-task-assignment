@@ -6,15 +6,14 @@
 **Source of ask:** Anomaly found while auditing the 2026-07-07 Mode 1 run — a direct client-to-PM
 email thread (Naz Lax Site — Givebutter widget, #8081) was mislabeled in the run narrative as an
 "overnight AM handoff from Jessica," when the source Gmail thread showed no AM involvement at all
-and was over a week stale, not overnight. Root cause: the skill has no data field that records who
-actually originated a signal — framing is inferred ad hoc from `sender.category` alone, with no
-guard against conflating AM-relay with direct-client contact.
+and was over a week stale, not overnight. This is a **compound bug**: the wrong actor role AND a
+false freshness claim, and the two need separate guards — see Problem below.
 
 ## 1. Problem
 
 Two channels feed the Morning Queue — Gmail and Orbit — and neither carries an explicit,
-machine-checkable record of **who really originated a signal** and **how it reached the PM**.
-This causes two distinct gaps:
+machine-checkable record of **who really originated a signal**, **how it reached the PM**, or
+**whether it's actually fresh**. This causes three distinct gaps:
 
 1. **Mislabeling risk (data exists, framing is wrong).** A Gmail signal's `sender.category`
    (`collectors/gmail.md`) is the only classification available, and nothing captures who else
@@ -22,14 +21,27 @@ This causes two distinct gaps:
    thread, can be — and was — narrated as an AM handoff. On the Orbit side, comment/activity
    entries carry `actor_id`/`actor_name` but no role classification at all, so a client or AM
    commenting directly on a task the PM owns renders identically to any other actor.
-2. **Visibility gap (data never arrives).** `collectors/orbit.md`'s universe model
+2. **Stale-thread / false-freshness risk (root cause of the observed anomaly).**
+   `synthesis/matcher.md` Job 4b Pass 1 corroborates a Gmail signal to an Orbit signal when **any**
+   of 4 rules hold (project match, actor match, topic match, time proximity) — only the 4th rule
+   checks recency, and the four are OR'd, not AND'd. A thread that matches purely on actor or topic
+   overlap can corroborate — and, worse, if such a thread is the *only* signal in a row (no
+   genuinely fresh event exists), it becomes that row's `latest_signal_anchor` by default with no
+   check that it's actually within this run's lookback window. That's exactly how a week-stale
+   thread gets narrated with "overnight"/"handed to you" language it never earned.
+3. **Visibility gap (data never arrives).** `collectors/orbit.md`'s universe model
    (`get_user_workload(PM)`) intentionally excludes tasks where the PM is a **follower**, not
    assignee. Today's stated mitigation — "the ask reliably surfaces through Gmail" — is only
    half-true: it relies on a *person* emailing the PM, not on Orbit's own automatic
    follower-notification emails, which the skill currently only parses for the fixed-cost lane
-   (`collectors/gmail.md` § Orbit-notification mails). Outside that lane, a comment on a
-   followed task — from an AM or a client with direct Orbit access — never reaches the PM's
-   queue at all.
+   (`collectors/gmail.md` § Orbit-notification mails). Those notification emails are
+   **system-generated** (sent from Orbit's own notification address, e.g.
+   `notifications@orbit...`) — the actual commenter is never the `sender`, so this class of signal
+   can never be classified via `sender.category` at all; the actor has to come from parsing the
+   mail's content (the existing fixed-cost mail-parser already does this correctly — § 4.2 reuses
+   that approach rather than inventing a new one). Outside the fixed-cost lane, a comment on a
+   followed task — from an AM or a client with direct Orbit access — never reaches the PM's queue
+   at all.
 
 ## 2. Scope
 
@@ -110,6 +122,30 @@ the provenance of whichever signal is `row.latest_signal_anchor` — the same si
 as "what triggered this row" (SKILL.md rule #24). Not a blend, not a vote — one consistent source
 of truth, reusing the anchor mechanic that already exists.
 
+### 5.1 Recency guard — freshness framing requires an in-window anchor
+
+Separate from *who* (provenance) is *when* (freshness) — a signal can be correctly labeled
+`client_direct` and still be wrongly described as "overnight" if nothing checks its age. Fix:
+
+- **`row.is_fresh`** (new boolean, computed alongside `row.latest_signal_anchor` in Job 7): true
+  only when the anchor signal's own timestamp falls within **this run's actual lookback window**
+  (`[last_run_timestamp, now]` — the same dynamic window `collectors/gmail.md` § Window already
+  computes per run: 12–18h normal, up to 7 days extended, 72h forced on Monday). Reuses the
+  existing value; no new constant, no fixed hour count — a fixed cutoff (e.g. "last 12-14h")
+  would incorrectly reject valid same-run corroboration on Monday/extended-lookback runs.
+- **Time-relative phrasing** ("overnight", "just now", "handed to you overnight", "today") is
+  permitted in Summary/AI-Notes/framing **only when `row.is_fresh == true`**. When `false`, the
+  row still renders its correct `provenance` tag (who) but drops all freshness language in favor
+  of a plain date reference (e.g. "Client asked about this on Jun 30" instead of "Client asked
+  overnight").
+- **Job 4b Pass 1 unaffected for context-attachment.** The existing actor-match/topic-match rules
+  (with their wider, non-recency-bound reach) still work exactly as today for populating
+  `context_signals[]` — attaching genuinely old backstory to a fresh row is legitimate and
+  intentional (per Job 4b's existing rationale: "email threads about a task routinely span days
+  before the Orbit task surfaces overnight"). The recency guard applies at the anchor/framing
+  layer only — an old signal can still be attached as context; it just can never *itself* claim
+  to be the fresh, triggering event unless it actually is.
+
 ## 6. Framing rule updates
 
 - **`references/am-context.md`** — new subsection, "Provenance-tag framing," mapping each tag to
@@ -119,8 +155,9 @@ of truth, reusing the anchor mechanic that already exists.
   - `am_direct` → existing "§ When an AM IS the originator" framing — same tag-driven
     confirmation.
   - `client_direct` → **new required phrasing**: "Client (`<name>`) emailed you directly — no AM
-    involved." Explicitly forbidden: "AM put this on your plate" / "AM handoff" language. This is
-    the direct fix for the Naz Lax mislabel.
+    involved." Explicitly forbidden: "AM put this on your plate" / "AM handoff" language. Combined
+    with § 5.1's recency guard (no "overnight" wording unless `row.is_fresh`), this is the direct
+    fix for the Naz Lax mislabel — it was both the wrong actor role and a false freshness claim.
   - `client_orbit_comment` → "Client (`<name>`) commented directly on Orbit task #`<id>`."
   - `am_orbit_comment` → same relay-vs-originated judgment as `am_relay`/`am_direct`, anchored on
     an Orbit comment instead of an email.
@@ -158,6 +195,10 @@ today's default (unmarked) phrasing rather than asserting a role.
 - **Volume risk (flagged, not solved now).** Generalizing the mail parser to all projects means
   more notification-mail volume for PMs following many active projects → potentially more Flag
   rows. Noted as a risk to observe post-launch; no throttling logic added preemptively.
+- **Row's only signal is stale (the Naz Lax case).** `row.is_fresh` computes `false`. The row
+  still emits with correct `provenance` and its normal verb — this is not a drop reason — but
+  Job 4/10 phrasing must fall back to plain-date wording (§ 5.1), never "overnight"/"today"
+  language.
 
 ## 8. Explicit out-of-scope
 
@@ -168,6 +209,12 @@ today's default (unmarked) phrasing rather than asserting a role.
 - No `cc_am_aware` flag, no separate Sources-section provenance marker — considered during design
   and cut per YAGNI; the Summary/AI-Notes phrasing fix is sufficient on its own.
 - No throttling/volume-control logic for the generalized mail parser.
+- No change to Job 4b Pass 1's context-attachment reach (`context_signals[]` backstory can still
+  span days, unchanged) — § 5.1's recency guard applies only to anchor/framing eligibility, not
+  to what may be attached as context.
+- No fixed-hour recency constant (e.g. a hardcoded "12-14h" cutoff) — would silently break
+  Monday/extended-lookback runs. The guard always reuses the run's own already-computed
+  lookback window.
 - The fixed-cost lane's existing state machine (FC-0..FC-4, Client-Ask Ledger, shadow dedup)
   stays completely as-is. This design only removes the mail parser's scope *gate* for
   non-fixed-cost projects; fixed-cost-tagged mail signals keep their current dedicated path
