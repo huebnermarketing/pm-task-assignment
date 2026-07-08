@@ -80,9 +80,9 @@ to recipients is not new capability, just wider application of existing logic:
 }
 ```
 
-### 4.2 Orbit collector (`collectors/orbit.md`)
+### 4.2 Orbit collector (`collectors/orbit.md`) — actor classification, and Gmail collector (`collectors/gmail.md`) — mail-parser generalization
 
-**Actor classification.** Every comment/activity entry gains `actor_category`, computed against
+**Actor classification** (`collectors/orbit.md`). Every comment/activity entry gains `actor_category`, computed against
 data the collector already resolves in-run:
 - Match against `AM_user_ids` (already built for the priority pass) → `am`.
 - Match against the workload/task assignee pool or pod-matrix roster → `team`.
@@ -90,7 +90,9 @@ data the collector already resolves in-run:
   falling back to name-substring match → `client`.
 - No match → `unknown`. Never guess a role.
 
-**Mail-parser gate removed.** The `## Orbit-notification mails` section (currently gated to
+**Mail-parser gate removed** (`collectors/gmail.md` — this parser reads Orbit's own notification
+emails through the Gmail MCP, so it lives in the Gmail collector, not the Orbit collector). The
+`## Orbit-notification mails` section (currently gated to
 `registry_snapshot.tracked_projects[]`, i.e. fixed-cost only) drops that gate and runs for every
 Orbit notification mail in the lookback window, resolving `project_id` the same way (subject/body
 `#<project_number>` match) regardless of fixed-cost status. The parsed `actor` field gets the same
@@ -115,7 +117,7 @@ collector-supplied categories; no new identity resolution happens here.
 | Gmail | sender is `team`/`leadership`/`self`/`unknown` | `null` |
 | Orbit (activity/comment, incl. generalized mail-parser) | `actor_category == client` | `client_orbit_comment` |
 | Orbit (activity/comment, incl. generalized mail-parser) | `actor_category == am` | `am_orbit_comment` |
-| Orbit | actor is `team`/`leadership`/`unknown` | `null` |
+| Orbit | actor is `team`/`unknown` | `null` |
 
 **Row-level provenance.** When Job 2 merges multiple signals into one row, `row.provenance` is
 the provenance of whichever signal is `row.latest_signal_anchor` — the same signal already chosen

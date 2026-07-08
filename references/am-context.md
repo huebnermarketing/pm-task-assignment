@@ -61,6 +61,31 @@ The relay framing is the default — but a small set of asks genuinely originate
 
 In those cases, framing as the AM's own ask is correct: "Ellen needs status for her internal sync — no client side, just a heads-up ask." Use judgement; the test is whether the ask exists because of a specific client action. If yes, frame as client-relayed. If no, frame as AM-originated.
 
+## Provenance-tag framing (machine-checkable)
+
+`synthesis/matcher.md` Job 1.5 computes `row.provenance` — one of five tags — on every row
+that involves an AM or a client. This turns the judgment calls above into an explicit,
+checkable field instead of an inference from `sender.category`/`actor_category` alone.
+Required phrasing per tag:
+
+| `row.provenance` | Required phrasing | Forbidden phrasing |
+|---|---|---|
+| `am_relay` | The existing relay framing in the table above (e.g. "Client (via AM Ellen) flagged a bug") — now confirmed by the tag, not inferred from "sender happens to be AM." | Anything implying the AM originated the ask themselves. |
+| `am_direct` | Per § "When an AM IS the originator" above — frame as the AM's own ask, no client involved. | Client-relay language when no client is on the thread. |
+| `client_direct` | "Client (`<name>`) emailed you directly — no AM involved." | "AM put this on your plate" / "AM handoff" / any AM-relay language — there is no AM on this thread. |
+| `client_orbit_comment` | "Client (`<name>`) commented directly on Orbit task #`<id>`." | Rendering the client's comment as generic team activity. |
+| `am_orbit_comment` | Same relay-vs-originated judgment as `am_relay`/`am_direct` above, anchored on an Orbit comment instead of an email. | Treating an AM's own Orbit comment as if it were a routine dev/QA comment. |
+
+**Freshness is separate from provenance.** Time-relative words ("overnight", "just now",
+"today") require `row.is_fresh == true` (`synthesis/matcher.md` Job 7 § Latest-signal anchor)
+regardless of which provenance tag applies — a correctly-tagged `client_direct` row from a
+week-old thread still must not say "overnight." Use a plain date instead.
+
+**Display is unaffected.** The name shown to the PM (`sender.name` / `actor_name`) is
+unchanged by any of this — it always renders. `provenance` is an internal field that only
+selects which phrasing template applies; when unresolved or ambiguous (`provenance: null`),
+the row simply falls back to today's default (unmarked) phrasing.
+
 ## Priority-lane phrasing (already correct, do not break)
 
 The existing phrasing for `signal_type: am_handed_to_pm_overnight_due_today` rows is consistent with this page and should not be rewritten by the AM-framing sweep:

@@ -339,6 +339,35 @@ Apply uniformly:
 
 `latest_signal` (§ Per-task `latest_signal`) is computed off this flattened, sorted list — `comments[0]` is the `orbit_comment` candidate. If the MCP changes its source ordering in a future version, only this collector adjusts — downstream consumers continue to read `comments[0]` as newest.
 
+## Actor classification — `actor_category` on every activity/comment entry
+
+Every comment and activity-log entry gets a role tag so downstream framing
+(`synthesis/matcher.md` Job 1.5, `references/am-context.md`) never conflates who actually
+posted it with a generic team comment. Runs once, after the MANDATORY tool call sequence
+completes (`AM_user_ids` resolved in step 3, `client_contacts` resolved in step 7) and before
+the sub-agent returns its output — same timing as the flatten-then-sort comment step above,
+so both post-processing passes happen together, no new MCP calls.
+
+Classification order (first match wins — never guess past a miss):
+
+1. **`actor_id` ∈ `AM_user_ids`** (resolved once per run, § AM identity resolution) → `am`.
+2. **`actor_id` matches the task's current assignee, any name in `references/pod-matrix.md`'s
+   resolved roster, or the project's `recent_task_assignees[]`** → `team`.
+3. **`actor_id`/`actor_name` matches an entry in the project's `client_contacts[]`**
+   (relationship map, populated from `list_clients`/`get_client_details` in mandatory
+   sequence step 7) by email first, name substring second → `client`.
+4. **No match against any of the above** → `unknown`. Do not guess.
+5. **Matches more than one of the above** (a rare identity collision — e.g. an id appearing
+   in both `AM_user_ids` and the team roster) → `ambiguous`. Never pick one arbitrarily.
+
+Add `actor_category: "am" | "team" | "client" | "unknown" | "ambiguous"` to:
+- Every entry in the per-task `comments[]` list (§ Comment ordering) — computed from that
+  entry's `user_id`.
+- Every `activity_log_entry` signal (§ Output shape — per signal) — computed from that
+  signal's `actor_id`.
+- The per-task `latest_signal` object (§ Per-task `latest_signal` field) — same value as
+  whichever comment/entry became that task's anchor.
+
 ## Per-task `latest_signal` field — the deep-read anchor
 
 Every task entry in the relationship map carries a structured `latest_signal` field that names the single most-recent event on the task. The matcher (Job 7) picks the newest across the row's input sources and passes it through as `row.latest_signal_anchor`; the writer renders it as the row-detail `**Triggered by:** ...` line. Per SKILL.md non-negotiable rule #24 — every row must carry an anchor or be dropped to `filtered_signals`.
@@ -362,6 +391,7 @@ latest_signal: {
   timestamp_iso: <ISO 8601>,
   author_id: <int>,
   author_name: <string>,
+  actor_category: "am" | "team" | "client" | "unknown" | "ambiguous",
   excerpt: <string, ≤ 240 chars, plain text>
 }
 ```
@@ -409,6 +439,7 @@ Each signal is a structured record:
   "task_url": <string or null>,
   "actor_name": <string>,
   "actor_id": <int>,
+  "actor_category": "am" | "team" | "client" | "unknown" | "ambiguous",
   "timestamp": <ISO datetime>,
   "content": <string — the exact change, comment text, or description>,
   "raw_source_data": <full source object for downstream reference>,

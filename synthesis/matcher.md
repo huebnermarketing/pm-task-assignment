@@ -108,6 +108,37 @@ Fathom is not a signal source. Meeting context is fetched as enrichment during J
 
 For priority-lane Orbit signals (`signal_type: am_handed_to_pm_overnight_due_today`): `project_id` and `parent_task_id` are already on the signal — no inference needed. Skip the rest of Job 1 for these and pass straight to Job 4b.
 
+### Job 1.5 — Provenance classification
+
+Runs immediately after Job 1 (grouping), before Job 2 (dedup), Job 4 (Summary), Job 4b
+(context-link), and Job 10 (AI Notes) — all four need `provenance` to render correctly. Pure
+lookup over categories the collectors already computed (`collectors/gmail.md` § Sender +
+recipient classification, `collectors/orbit.md` § Actor classification) — no new identity
+resolution happens here.
+
+| Signal source | Condition | `signal.provenance` |
+|---|---|---|
+| Gmail | `sender.category == am` AND any of `recipients.to`/`recipients.cc` is `client` | `am_relay` |
+| Gmail | `sender.category == am` AND no `client` in recipients | `am_direct` |
+| Gmail | `sender.category == client` | `client_direct` |
+| Gmail | `sender.category` is `team` / `leadership` / `self` / `unknown` | `null` |
+| Orbit (comment/activity entries, incl. `origin: orbit_notification_mail` / `origin: fixed_cost_mail`) | `actor_category == client` | `client_orbit_comment` |
+| Orbit (as above) | `actor_category == am` | `am_orbit_comment` |
+| Orbit (as above) | `actor_category` is `team` / `unknown` | `null` |
+
+**Ambiguous actor/sender.** When the collector-supplied category is `ambiguous` (matched more
+than one role — see `collectors/orbit.md` § Actor classification, `collectors/gmail.md` §
+Sender + recipient classification), set `signal.provenance = null` and
+`signal.ambiguous_actor_name = <the actor/sender's name>`. Job 10 reads this field to emit
+`Uncertain: actor <name> matched more than one role; provenance not set.` Never guess a role.
+
+`provenance: null` is the common case — most signals are ordinary internal/team activity and
+render exactly as they do today. The five non-null tags (`am_relay`, `am_direct`,
+`client_direct`, `client_orbit_comment`, `am_orbit_comment`) only matter when set.
+
+**Row-level provenance is finalized in Job 7**, once `row.latest_signal_anchor` is chosen —
+see Job 7 § Latest-signal anchor below.
+
 ### Job 2 — Deduplicate across sources
 
 A single issue may show up in both Gmail and Orbit. Matcher merges them into one item.
@@ -121,6 +152,12 @@ Match signals as the same item when:
 When merging, preserve all source signals in `source_signals`. The row's detail page will cite each source separately. Fathom enrichment (if fetched in Job 4b) is attached to whichever primary signal triggered the fetch — it is never a co-signal to dedupe against.
 
 **Fixed-cost mail carve-out.** Signals with `origin: fixed_cost_mail` are EXEMPT from Job 2 dedup — never merge them here, even when they match an Orbit signal on project/topic/actors/window. Their dedup is owned exclusively by Job 4c's shadow dedup (Orbit wins; the mail copy must stay countable for FC-0's audit and the `mail_signals` stat — a Job 2 merge would destroy that distinct mail-side event).
+
+`origin: orbit_notification_mail` signals (the generalized, non-fixed-cost mail lane —
+`collectors/gmail.md` § Orbit-notification mails) are explicitly **NOT** part of this
+carve-out — they dedup normally under this Job's existing rules, including the "same project
+AND same topic/deliverable (keyword overlap)" fallback above for the common case where a
+mail-derived signal has no `task_id` to match a same-task Orbit signal on.
 
 ### Job 3 — Uncertainty handling — NO probable-match grouping
 
@@ -183,6 +220,16 @@ Rules:
 - **Professional tone.** Full English phrasing — avoid casual contractions, sentence fragments where a noun phrase reads cleaner, slang, exclamation, or hedge words ("kinda", "stuff", "thing"). The Summary reads like a one-line entry in a professional task tracker, not a colleague's quick note.
 - **No emojis. No decorative glyphs. No assignee name. No PM-action phrasing.** Assignee lives in `Recommended Assignee` column; PM action lives in `Recommended Action` column.
 - **Max 120 chars total** (Notion title field stays scannable across the column).
+
+#### Provenance-aware phrasing (reads `row.provenance` + `row.is_fresh`)
+
+When `row.provenance` is non-null, the Summary/Task Brief/AI-Notes text for this row MUST
+follow the matching phrasing rule in `references/am-context.md` § Provenance-tag framing —
+never infer framing from `sender.category`/`actor_category` directly. Time-relative words
+("overnight", "just now", "today", "handed to you overnight") may appear ONLY when
+`row.is_fresh == true`; when `false`, use a plain date reference instead (e.g. "Client asked
+about this on Jun 30" rather than "Client asked overnight"). `provenance: null` rows are
+unaffected — render exactly as before this design.
 
 ### Job 4b — Context cross-link (Gmail → Orbit) + Fathom enrichment fetch
 
@@ -294,6 +341,7 @@ The action set is closed: `Create subtask`, `Reopen subtask`, `Hand off parent t
     - **Another signal exists on the same task** (new comment, status change, attached Gmail ask, or — handled above — an AM handoff). That signal's verb wins; the standalone due-today signal is consumed, NOT emitted as its own row. Set `row.due_today = true` so Job 10 prepends `Due today.` to AI Notes and Sort rule 0.5 lifts the row into the due-today band. One task → one row.
     - **due-today is the only signal on the task** → emit a `Flag` row. Anchor = the `orbit_due_today` `latest_signal` from the collector. `pm_next_step = "Due today — review and delegate, progress, or close."` The row carries **no proposed Orbit body, no recommended assignee (`— (PM action)`), and no handoff** — it stays a Flag; the skill does not invent work for a task with no new ask. **BUT this Flag is the one Flag class that fires a *light* deep-read** (see Job 7 § Light deep-read for due-today Flags): a single `get_task_details(task_id)` call — its bundled newest comments (off the flattened, newest-first tree) + `subtasks[]` are enough; NO `list_task_comments` fallback — so Job 7b can compose a "here's where this stands" task_brief and surface the open-subtask status — letting the PM decide inside Notion without opening Orbit (the single-pane mandate). If the cached/fetched `subtasks[]` shows an open subtask already under this task, the brief notes `subtask #<id> open under <assignee> — likely needs your review, not re-delegation.` and AI Notes carries `Due today — subtask #<id> already open under <assignee>; informational, no action needed unless it's stalled.` This Flag is exempt from the "PM will see it in Orbit's UI" drop (Output gating) — that exemption is the whole point of the change.
 2.6. **Fixed-cost state candidates (from Job 4c).** Row candidates carrying `fc_row_type: follow_up_reminder | stale_work_ping` arrive pre-classified as `Flag` — Job 4c (`synthesis/fixed-cost-state.md`) already decided they're actionable-for-PM before handing them to Job 5. No delegation target at emission (Recommended Assignee `—`); a PM note can promote a stale-work ping to a dev exactly like a due-today Flag (see synthesis/fixed-cost-state.md § Output & downstream).
+2.7. **Follower-only Orbit-mail branch.** If the signal carries `origin: orbit_notification_mail` (the generalized mail parser, `collectors/gmail.md` § Orbit-notification mails) AND the PM is NOT the assignee of the resolved task (or the mail is project-level with no `task_id`) — the PM is a follower here, not an owner — emit a `Flag` immediately. Never attempt `Create subtask` / `Reopen subtask` / `Hand off parent task` for this branch: there is no PM-owned parent to act under by definition, and a passive "someone commented on a task you follow" signal is never dev-shaped work regardless of `work_type`. `pm_next_step: "Review comment on a task you follow — no delegation assumed."` `recommended_assignee = "— (PM action)"`. Skip Job 6, Job 7's full deep-read, and Job 8 exactly like any other Flag row (this branch does not qualify for the `pm_task_due_today` light-deep-read exception). Does not apply to `origin: fixed_cost_mail` signals — those keep their existing Job 4c routing unchanged.
 3. **Flag the PM-owned moves first.** If the next move is PM-owned (reply to an AM, decide a scope question, brief the team for a meeting), choose `Flag` regardless of work_type. Examples: "Ellen needs dev names for the 27 May Joe Warner call", "FTP credentials still missing — PM decides whether to chase client directly".
 4. **Unactioned client signal check (Possible Orbit miss).** Before defaulting a Gmail-only signal to a workshop verb, run the "Unactioned client signal → Create parent task" detection below. If the entry gate + any one of the three trigger sub-classes (S1a/S1b/S2) fire, run project resolution + dedup: a resolved, non-duplicate project → `Create parent task`; project not found or a topic-matching open task already exists → `Flag` with the corresponding `pm_next_step`.
 5. **Work-type → verb branch.** For signals that are dev-shaped work (not PM-owned, not Possible Orbit miss), the verb depends on `work_type`:
@@ -639,6 +687,28 @@ row.latest_signal_anchor = {
 
 If no input source carries a signal (rare — a row with no trigger), drop to `filtered_signals` with `filter_reason: no_trigger_signal_identifiable` rather than ship with a null anchor. The writer's render needs this field; a row without it cannot render its Triggered-by line. Applies to every verb — Flag, Reopen subtask, Hand off parent task, Create parent task — same contract, no exceptions.
 
+**Row-level provenance and freshness (computed immediately after the anchor above, same
+Job 7 step, no new MCP calls).**
+
+- `row.provenance` = the `signal.provenance` value (Job 1.5) of whichever signal became
+  `row.latest_signal_anchor` above — not a blend of every signal in the row, not a vote.
+  `null` when the anchor signal's own provenance is `null` (ordinary internal/team signal).
+- `row.is_fresh` = `true` only when `row.latest_signal_anchor.timestamp_iso` falls within
+  this run's own lookback window (`[last_run_timestamp, now]` — the same dynamic window
+  `collectors/gmail.md` § Window already computes per run: 12–18h normal, up to 7 days
+  extended, 72h forced on Monday). `false` otherwise. **Never a fixed hour cutoff** — a
+  hardcoded window would incorrectly reject valid same-run corroboration on Monday/extended
+  runs.
+- Both fields are pass-through computations over data already in context.
+
+**Job 4b Pass 1 (context-link) is unaffected.** Its actor-match/topic-match corroboration
+rules still reach further back than the lookback window on purpose — attaching genuinely old
+backstory (`context_signals[]`) to a fresh row is intentional (Job 4b's own stated rationale:
+"email threads about a task routinely span days before the Orbit task surfaces overnight").
+`row.is_fresh` gates only the anchor/framing layer above — an old signal can still be
+attached as context; it can never itself claim to be the fresh, triggering event unless it
+actually is.
+
 #### Path-specific body rules
 
 **Create subtask path** — pre-write the full 6-section task body per `schemas/orbit-dq-standard.md`, applying the mandatory enrichment above. Plain language (4th–5th grade English) per `writers/plain-language.md` since the delivery team reads it. Keep role-specific technical terms. Strip corporate English. The 6-section body lands in Orbit as the sub-task description when Mode 2 fires.
@@ -699,6 +769,7 @@ Include only things worth the PM knowing:
 - When a single signal was split into multiple items
 - When the recommended assignee isn't obvious
 - When a collector failed and this item has partial context
+- When `signal.ambiguous_actor_name` is set (Job 1.5) — emit `Uncertain: actor <name> matched more than one role; provenance not set.`
 
 Leave empty if nothing notable.
 
